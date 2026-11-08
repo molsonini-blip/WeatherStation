@@ -1782,6 +1782,11 @@ def build_app(mon: Monitor):
         return web.json_response(mon.db.kv_get("backup_status", {}) or dict(ok=True, target=None))
 
     r.add_post("/api/backup", backup_now)
+
+    import bills as bills_mod
+    import rachio as rachio_mod
+    bills_mod.register(r, web, mon, mon.bills)
+    rachio_mod.register(r, web, mon, mon.rachio)
     r.add_get("/api/hailcam/image", hailcam_image)
     r.add_post("/api/hailcam/test", hailcam_test)
     r.add_static("/static", STATIC)
@@ -1819,6 +1824,10 @@ async def main():
             log.warning("YoLink check failed: %s", e)
     await mon.backfill()
 
+    import bills as bills_mod
+    import rachio as rachio_mod
+    mon.bills = bills_mod.Bills(mon, CFG, resolve_share_host)
+    mon.rachio = rachio_mod.Rachio(mon, CFG)
     runner = web.AppRunner(build_app(mon))
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", CFG.http_port).start()
@@ -1827,7 +1836,8 @@ async def main():
     log.info("daily history: %d days summarised", n)
     mon.hailcam_setup()
     await asyncio.gather(mon.udp_loop(), mon.ws_loop(), mon.scheduler(), mon.daily_loop(), mon.hailcam_loop(),
-                         mon.yolink_th_loop(), mon.history_backfill_loop())
+                         mon.yolink_th_loop(), mon.history_backfill_loop(),
+                         mon.bills.inbox_loop(), mon.bills.smt_loop(), mon.rachio.loop())
 
 
 if __name__ == "__main__":

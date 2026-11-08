@@ -28,6 +28,7 @@
   --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;--b1:#cde2fb;--b2:#86b6ef;--b3:#3987e5;--b4:#256abf;--b5:#184f95;--c1:#3987e5;--c2:#d95926;--c3:#199e70;--c4:#c98500;--c5:#d55181;--c6:#008300;--c7:#9085e9;--c8:#e66767;
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
 .wrap{max-width:1180px;margin:0 auto;padding:20px 16px 48px}
 header{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin-bottom:16px}
@@ -139,6 +140,24 @@ main[hidden]{display:none}
 .recs{grid-column:span 12;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
 .recs .card .v{font-size:24px;font-weight:500}.recs .card .d{font-size:12.5px;color:var(--ink-2)}
 td.hl{font-weight:650}
+.tabs{flex-wrap:wrap}
+.bcards{grid-column:span 12;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr))}
+.bc .amt{font-size:30px;font-weight:500;letter-spacing:-.02em;margin:4px 0}
+.bc .meta{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--ink-2);font-size:12.5px}
+.up{color:var(--critical)}.down{color:var(--good)}
+.form{grid-column:span 12;display:grid;gap:10px;grid-template-columns:repeat(auto-fill,minmax(min(100%,170px),1fr));align-items:end}
+.form label{display:flex;flex-direction:column;gap:4px;font-size:12.5px;color:var(--ink-2)}
+.form input,.form select,.zc input{font:inherit;color:var(--ink);background:var(--surface);border:0;box-shadow:inset 0 0 0 1px var(--ring);border-radius:8px;padding:6px 8px;min-width:0}
+.btnrow{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button.primary{background:var(--ink);color:var(--surface)}
+button.danger{box-shadow:inset 0 0 0 1px var(--critical);color:var(--critical)}
+.zgrid{grid-column:span 12;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,250px),1fr))}
+.zc.off{opacity:.55}.zc .zn{font-weight:600;display:flex;gap:8px;align-items:baseline}.zc .zn small{color:var(--ink-3);font-weight:400}
+.zc .meta{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--ink-2);font-size:12.5px;margin:6px 0 10px}
+.zc .run{display:flex;gap:6px;align-items:center}.zc input{width:64px}
+.dev{grid-column:span 12;display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.big3{font-size:22px;font-weight:550}
+.legend i.sq{width:10px;height:10px;border-radius:2px}
 .live-only{display:none}body.live .live-only{display:block}
 @media (max-width:900px){.hero,.tiles,.chart,.half{grid-column:span 12}.tiles{grid-template-columns:repeat(2,1fr)}.fc{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:520px){.big{font-size:52px}.tiles{grid-template-columns:1fr 1fr}.fc{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -151,7 +170,7 @@ td.hl{font-weight:650}
       <h1 id="station">Tempest Monitor</h1>
       <div class="sub" id="fresh">Connecting…</div>
     </div>
-    <nav class="tabs" aria-label="Pages"><a href="#weather" data-pg="weather">Weather</a><a href="#yolink" data-pg="yolink">YoLink</a><a href="#history" data-pg="history">History</a></nav>
+    <nav class="tabs" aria-label="Pages"><a href="#weather" data-pg="weather">Weather</a><a href="#yolink" data-pg="yolink">YoLink</a><a href="#history" data-pg="history">History</a><a href="#bills" data-pg="bills">Bills</a><a href="#sprinklers" data-pg="sprinklers">Sprinklers</a></nav>
     <div class="spacer"></div>
     <span class="badge" id="badge" role="status"><span class="dot"></span><span id="modeLabel">Normal</span></span>
     <div class="seg" id="range" aria-label="History range">
@@ -256,6 +275,47 @@ td.hl{font-weight:650}
         <svg class="viz" id="hChart" style="height:300px"></svg><div class="sub" id="hHint" style="margin-top:6px"></div></section>
       <section class="card" style="grid-column:span 12"><h2>By year</h2><div style="overflow:auto"><table id="hYears"></table></div></section>
       <section class="card" style="grid-column:span 12"><h2 id="hMonTitle">By month</h2><div style="overflow:auto"><table id="hMonths"></table></div></section>
+    </div>
+  </main>
+
+  <main id="pgBills" hidden>
+    <div class="grid">
+      <div class="hctl" style="grid-column:span 12">
+        <input type="file" id="bFile" accept="application/pdf" multiple hidden>
+        <button id="bUpload" class="primary">Upload bill PDF</button><button id="bAddBtn">Add bill by hand</button><button id="bScan">Check bills folder</button>
+        <span class="sub" id="bInbox"></span>
+      </div>
+      <div class="notice card" id="bNote" style="display:none"></div>
+      <section class="card form" id="bForm" hidden>
+        <input type="hidden" id="bfId">
+        <label>Bill type<select id="bfUtility"><option value="electric">Electric</option><option value="water">Water</option><option value="gas">Gas</option><option value="internet">Internet</option></select></label>
+        <label>Provider<input id="bfProvider" placeholder="Rhythm"></label>
+        <label>Amount ($)<input id="bfAmount" inputmode="decimal"></label>
+        <label>Usage<input id="bfUsage" inputmode="decimal"></label>
+        <label>Unit<input id="bfUnit" placeholder="kWh / gal / therms"></label>
+        <label>Period start<input id="bfStart" type="date"></label>
+        <label>Period end<input id="bfEnd" type="date"></label>
+        <label>Due date<input id="bfDue" type="date"></label>
+        <div class="btnrow"><button class="primary" id="bfSave">Save bill</button><button id="bfCancel">Cancel</button><span class="sub" id="bfMsg"></span></div>
+      </section>
+      <div class="bcards" id="bCards"></div>
+      <section class="card chart wide"><div class="head"><h2>Monthly cost</h2><span class="legend" id="bLeg"></span><span class="now" id="bTotal"></span></div><svg class="viz" id="bChart" style="height:240px"></svg></section>
+      <section class="card chart"><div class="head"><h2>Electricity per day · Smart Meter Texas</h2><span class="now" id="smtNow"></span></div><svg class="viz" id="smtChart"></svg><div class="sub" id="smtNote"></div></section>
+      <section class="card chart"><div class="head"><h2>Outdoor average temperature</h2></div><svg class="viz" id="smtTemp"></svg><div class="sub">Same days as the electricity chart, from your Tempest.</div></section>
+      <section class="card" style="grid-column:span 12"><h2>All bills</h2><div style="overflow:auto"><table id="bTable"></table></div></section>
+    </div>
+  </main>
+
+  <main id="pgSprinklers" hidden>
+    <div class="grid">
+      <div class="notice card" id="rNote" style="display:none"></div>
+      <div class="dev" id="rDev"></div>
+      <div class="zgrid" id="rZones"></div>
+      <section class="card chart"><div class="head"><h2>Watering per day · minutes</h2><span class="now" id="rMinNow"></span></div><svg class="viz" id="rMin"></svg></section>
+      <section class="card chart"><div class="head"><h2>Rain per day · inches (Tempest)</h2><span class="now" id="rRainNow"></span></div><svg class="viz" id="rRain"></svg></section>
+      <section class="card" style="grid-column:span 12"><h2>Sprinklers vs water bill</h2><div style="overflow:auto"><table id="rWater"></table></div>
+        <div class="sub" style="margin-top:6px">Sprinkler gallons are estimated from each zone's nozzle rate and area in the Rachio app. Bill gallons come from the Bills tab.</div></section>
+      <section class="card" style="grid-column:span 12"><h2>Sprinkler log</h2><div class="log" id="rLog"></div></section>
     </div>
   </main>
 </div>
@@ -578,6 +638,8 @@ function connect() {
   es.addEventListener("mode", e => { renderState(JSON.parse(e.data)); loadHistory(); loadLists(); });
   es.addEventListener("event", () => loadLists());
   es.addEventListener("yolink", e => { if (page === "yolink") loadYolink(); });
+  es.addEventListener("bills", () => { if (page === "bills") loadBills(); });
+  es.addEventListener("rachio", () => { if (page === "sprinklers") loadRachio(); });
   es.addEventListener("hailcam", e => { state.hailcam = JSON.parse(e.data); renderHailcam(state.hailcam); });
   es.addEventListener("shield", e => { renderShield(JSON.parse(e.data)); loadLists(); });
   es.addEventListener("hail", e => { const h = JSON.parse(e.data); $("rainD").textContent = h.confirmed ? "⚠ Hail detected" : "Possible hail (unconfirmed)"; loadLists(); });
@@ -591,7 +653,7 @@ $("range").onclick = e => { const b = e.target.closest("button"); if (!b) return
   hours = +b.dataset.h; $("range").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); loadHistory(); if (page === "yolink") loadYolink(); };
 $("testBtn").onclick = async () => { const r = await fetch("/api/test-ifttt", {method: "POST"}).then(r => r.json()).catch(() => ({ok: false}));
   $("testMsg").textContent = r.ok ? `Sent “${r.event}”` : (r.error || "Failed"); };
-addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTimeout(() => { drawAll(); if (page === "yolink") drawYolink(); if (page === "history") drawYoy(); }, 150); });
+addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTimeout(() => { drawAll(); if (page === "yolink") drawYolink(); if (page === "history") drawYoy(); if (page === "bills") drawBills(); if (page === "sprinklers") drawRachio(); }, 150); });
 
 /* refresh cadence follows the mode: every 5 min when calm, every 30 s when live */
 (async function tick() {
@@ -601,12 +663,14 @@ addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTim
 /* ---------- pages: Weather / YoLink ---------- */
 let page = "weather", ylSnap = null;
 function showPage() {
-  page = {"#yolink": "yolink", "#history": "history"}[location.hash] || "weather";
+  page = {"#yolink": "yolink", "#history": "history", "#bills": "bills", "#sprinklers": "sprinklers"}[location.hash] || "weather";
   $("pgWeather").hidden = page !== "weather"; $("pgYolink").hidden = page !== "yolink"; $("pgHistory").hidden = page !== "history";
+  $("pgBills").hidden = page !== "bills"; $("pgSprinklers").hidden = page !== "sprinklers";
   document.querySelectorAll(".tabs a").forEach(a => a.dataset.pg === page ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
   $("badge").style.display = page === "weather" ? "" : "none";
   $("range").style.display = page === "weather" ? "" : "none";
-  if (page === "yolink") loadYolink(); else if (page === "history") loadHistoryPage(); else drawAll();
+  if (page === "yolink") loadYolink(); else if (page === "history") loadHistoryPage(); else if (page === "bills") loadBills();
+  else if (page === "sprinklers") loadRachio(); else drawAll();
 }
 addEventListener("hashchange", showPage);
 
@@ -835,6 +899,188 @@ $("hBkBtn").onclick = async () => { $("hBkBtn").textContent = "Backing up…";
   $("hBkBtn").textContent = "Back up now"; showBackup(r.target === undefined ? null : r); };
 $("hSrc").onchange = e => { hSrc = e.target.value; loadYoy(); };
 $("hMetric").onclick = e => { const b = e.target.closest("button"); if (b) { hMetric = b.dataset.m; loadYoy(); } };
+
+/* ---------- bar charts (simple and stacked), shared by Bills and Sprinklers ---------- */
+function bars(svg, cats, stacks, opt = {}) {
+  // cats: [{key, label}], stacks: [{k, l, c}] ; each cat has values cat.v[k]
+  const W = svg.clientWidth || 600, H = svg.clientHeight || 180, L = 44, R = 8, T = 8, B = 22;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const tot = cats.map(c => stacks.reduce((a, s) => a + (c.v[s.k] || 0), 0));
+  if (!cats.length || !Math.max(0, ...tot)) { svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle">${opt.empty || "No data yet"}</text>`; return; }
+  const mx = Math.max(...tot), raw = mx / 4, mag = 10 ** Math.floor(Math.log10(raw || 1)), step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(k => k >= raw), hi = Math.ceil(mx / step) * step;
+  const Y = v => T + (1 - v / hi) * (H - T - B), slot = (W - L - R) / cats.length, bw = Math.max(3, Math.min(36, slot - 4));
+  let g = "";
+  for (let v = 0; v <= hi + step / 2; v += step) g += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--grid)"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${opt.money ? "$" : ""}${fmt(v, step < 1 ? (step < .1 ? 2 : 1) : 0)}</text>`;
+  const every = Math.ceil(cats.length / Math.max(2, Math.floor((W - L) / 64)));
+  cats.forEach((c, i) => { const x = L + slot * i + (slot - bw) / 2; let acc = 0;
+    stacks.forEach(st => { const v = c.v[st.k] || 0; if (!v) return; const y1 = Y(acc + v), y0 = Y(acc); acc += v;
+      g += `<rect x="${x}" y="${y1}" width="${bw}" height="${Math.max(1, y0 - y1 - (stacks.length > 1 ? 1 : 0))}" rx="${Math.min(3, bw / 4)}" fill="${st.c}"/>`; });
+    if (i % every === 0) g += `<text x="${x + bw / 2}" y="${H - 6}" text-anchor="middle">${c.label}</text>`;
+    g += `<rect class="hit" data-i="${i}" x="${L + slot * i}" y="${T}" width="${slot}" height="${H - T - B}" fill="transparent"/>`; });
+  g += `<line x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--axis)"/>`;
+  svg.innerHTML = g;
+  svg.onmousemove = e => { const h = e.target.closest(".hit"); if (!h) { tip.style.display = "none"; return; }
+    const c = cats[+h.dataset.i];
+    tip.innerHTML = `${c.title || c.label}<br>` + stacks.filter(st => c.v[st.k]).map(st => `${stacks.length > 1 ? `<span style="color:${st.c}">■</span> ` : ""}${st.l}: <b>${opt.money ? "$" : ""}${fmt(c.v[st.k], opt.dec ?? 0)}${opt.u || ""}</b>`).join("<br>") +
+      (stacks.length > 1 ? `<br>Total: <b>${opt.money ? "$" : ""}${fmt(tot[+h.dataset.i], opt.dec ?? 0)}</b>` : "") + (c.extra || "");
+    tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY - 12 - tip.offsetHeight) + "px"; };
+  svg.onmouseleave = () => tip.style.display = "none";
+}
+const shortDay = d => new Date(d + "T12:00").toLocaleDateString([], {month: "short", day: "numeric"});
+const monthLabel = m => new Date(m + "-15T12:00").toLocaleDateString([], {month: "short", year: "2-digit"});
+
+/* ---------- Bills tab ---------- */
+const UTIL = {electric: ["Electric", "var(--c4)"], water: ["Water", "var(--c1)"], gas: ["Gas", "var(--c2)"], internet: ["Internet", "var(--c7)"]};
+let bSum = null, bMon = null, smt = [];
+async function loadBills() {
+  try { [bSum, bMon, smt] = await Promise.all([j("/api/bills"), j("/api/bills/monthly"), j("/api/smt/daily?days=60")]); } catch (e) { return; }
+  const st = bSum.status;
+  $("bInbox").textContent = st.inbox ? `Drop PDFs in ${st.inbox.replace(/\//g, "\\")}` + (st.error ? ` · ⚠ ${st.error}` : st.last_scan ? ` · checked ${ago(st.last_scan)}` : "") : "No bills folder set";
+  renderBillCards(); renderBillTable(); drawBills();
+}
+function renderBillCards() {
+  const L = bSum.latest, pct = (a, b) => a == null || !b ? "" : (() => { const d = (a - b) / b * 100; return `<span class="${d > 1 ? "up" : d < -1 ? "down" : ""}">${d > 0 ? "▲" : d < 0 ? "▼" : ""} ${fmt(Math.abs(d))}%</span>`; })();
+  $("bCards").innerHTML = Object.keys(UTIL).map(u => { const x = L[u];
+    if (!x) return `<div class="card bc"><h2>${UTIL[u][0]}</h2><div class="amt" style="color:var(--ink-3)">--</div><div class="meta"><span>No bills yet</span></div></div>`;
+    const c = x.cur;
+    return `<div class="card bc"><h2>${UTIL[u][0]}${c.provider ? ` · ${escapeHtml(c.provider)}` : ""}</h2>
+      <div class="amt">$${fmt(c.amount, 2)}</div>
+      <div class="meta"><span>${c.period_start ? shortDay(c.period_start) + " – " : ""}${c.period_end ? shortDay(c.period_end) : ""}</span>${c.usage != null ? `<span>${fmt(c.usage)} ${escapeHtml(c.unit || "")}</span>` : ""}</div>
+      <div class="meta" style="margin-top:4px">${x.prev_amount != null ? `<span>vs last bill ${pct(c.amount, x.prev_amount)}</span>` : ""}${x.ly_amount != null ? `<span>vs last year ${pct(c.amount, x.ly_amount)}</span>` : ""}
+      ${u === "electric" && c.usage ? `<span>${fmt(c.amount / c.usage * 100, 1)}¢/kWh</span>` : ""}</div>
+      ${c.status === "review" ? `<span class="pill warn" style="margin-top:8px">Needs review</span>` : ""}</div>`; }).join("");
+  const n = bSum.bills.filter(b => b.status === "review").length;
+  $("bNote").style.display = n ? "" : "none";
+  $("bNote").innerHTML = n ? `<b>${n} bill${n > 1 ? "s" : ""} need${n > 1 ? "" : "s"} review.</b> Some details couldn't be read from the PDF. Click <b>Edit</b> in the table below to fill them in.` : "";
+}
+let bShowAll = false;
+function renderBillTable() {
+  const all = bSum.bills, B = bShowAll ? all : all.slice(0, 16);
+  $("bTable").innerHTML = `<tr><th>Bill</th><th>Provider</th><th>Period</th><th class="n">Amount</th><th class="n">Usage</th><th class="n">Rate</th><th>Status</th><th></th></tr>` +
+    (B.length ? B.map(b => `<tr><td>${UTIL[b.utility] ? UTIL[b.utility][0] : "?"}</td><td>${escapeHtml(b.provider || "")}</td>
+      <td>${b.period_start ? shortDay(b.period_start) + " – " : ""}${b.period_end ? shortDay(b.period_end) + ", " + b.period_end.slice(0, 4) : ""}</td>
+      <td class="n">${b.amount != null ? "$" + fmt(b.amount, 2) : "--"}</td><td class="n">${b.usage != null ? fmt(b.usage) + " " + escapeHtml(b.unit || "") : ""}</td>
+      <td class="n">${b.amount && b.usage ? (b.utility === "electric" ? fmt(b.amount / b.usage * 100, 1) + "¢/kWh" : b.utility === "water" ? "$" + fmt(b.amount / b.usage * 1000, 2) + "/kgal" : "$" + fmt(b.amount / b.usage, 2) + "/" + escapeHtml(b.unit || "")) : ""}</td>
+      <td>${b.status === "review" ? `<span class="pill warn">Needs review</span>` : `<span class="sub">${b.source === "manual" ? "Entered" : "Read from PDF"}</span>`}</td>
+      <td class="btnrow" style="flex-wrap:nowrap">${b.file ? `<a href="/api/bills/${b.id}/pdf" target="_blank" rel="noopener" style="color:var(--s1)">PDF</a>` : ""}<button data-edit="${b.id}">Edit</button><button data-del="${b.id}">Delete</button></td></tr>`).join("")
+      : `<tr><td colspan="8" class="empty">No bills yet. Upload a PDF, drop it in the bills folder, or add one by hand.</td></tr>`) +
+    (all.length > 16 ? `<tr><td colspan="8"><button id="bMore">${bShowAll ? "Show recent only" : `Show all ${all.length} bills`}</button></td></tr>` : "");
+}
+function drawBills() {
+  if (!bMon) return;
+  const months = [...new Set(bMon.rows.map(r => r.month))].sort().slice(-24), by = {};
+  bMon.rows.forEach(r => (by[r.month] = by[r.month] || {})[r.utility] = r.amount);
+  const stacks = Object.keys(UTIL).map(u => ({k: u, l: UTIL[u][0], c: UTIL[u][1]}));
+  $("bLeg").innerHTML = stacks.map(s => `<span><i class="sq" style="background:${s.c}"></i>${s.l}</span>`).join("");
+  bars($("bChart"), months.map(m => { const w = bMon.weather[m];
+    return {label: monthLabel(m), title: new Date(m + "-15T12:00").toLocaleDateString([], {month: "long", year: "numeric"}), v: by[m] || {},
+      extra: w ? `<br>Avg outdoor ${fmt(w.t_avg)}°F · cooling ${fmt(w.cdd)} / heating ${fmt(w.hdd)} degree-days` : ""}; }),
+    stacks, {money: true, dec: 2, empty: "Monthly totals appear once bills are added"});
+  const last = months[months.length - 1]; $("bTotal").textContent = last ? `${monthLabel(last)}: $${fmt(Object.values(by[last] || {}).reduce((a, b) => a + (b || 0), 0), 2)}` : "";
+  const st = (bSum && bSum.status.smt) || null;
+  $("smtNote").textContent = smt.length ? "Daily totals from your meter's 15-minute readings (usually a day or two behind)." :
+    st && !st.ok ? `Smart Meter Texas: ${st.error}` : "Add SMT_USERNAME and SMT_PASSWORD (your smartmetertexas.com login) to the settings file to see daily electricity use here.";
+  bars($("smtChart"), smt.map(d => ({label: shortDay(d.day), title: new Date(d.day + "T12:00").toLocaleDateString([], {weekday: "short", month: "short", day: "numeric"}), v: {kwh: d.kwh},
+    extra: d.t_avg != null ? `<br>Outdoor avg ${fmt(d.t_avg)}°F, high ${fmt(d.t_hi)}°F` : ""})), [{k: "kwh", l: "Electricity", c: "var(--c4)"}], {u: " kWh", dec: 1, empty: "No meter data yet"});
+  if (smt.length) { const l = smt[smt.length - 1]; $("smtNow").textContent = `${shortDay(l.day)}: ${fmt(l.kwh, 1)} kWh`; }
+  const t0 = smt.length ? new Date(smt[0].day + "T00:00").getTime() / 1000 : Date.now() / 1000 - 60 * 86400;
+  mchart($("smtTemp"), [{l: "Avg temp", c: "var(--s1)", rows: smt.map(d => ({ts: new Date(d.day + "T12:00").getTime() / 1000, v: d.t_avg}))}], {u: "°F", x0: t0, x1: Date.now() / 1000, span: 10, gap: 3 * 86400});
+}
+function billForm(b) {
+  $("bForm").hidden = false; $("bfMsg").textContent = "";
+  $("bfId").value = b ? b.id : ""; $("bfUtility").value = (b && b.utility) || "electric"; $("bfProvider").value = (b && b.provider) || "";
+  $("bfAmount").value = b && b.amount != null ? b.amount : ""; $("bfUsage").value = b && b.usage != null ? b.usage : ""; $("bfUnit").value = (b && b.unit) || "";
+  $("bfStart").value = (b && b.period_start) || ""; $("bfEnd").value = (b && b.period_end) || ""; $("bfDue").value = (b && b.due_date) || "";
+  $("bForm").scrollIntoView({block: "nearest", behavior: "smooth"});
+}
+$("bAddBtn").onclick = () => billForm(null);
+$("bfCancel").onclick = () => { $("bForm").hidden = true; };
+$("bfSave").onclick = async () => {
+  const body = {id: $("bfId").value || null, utility: $("bfUtility").value, provider: $("bfProvider").value, amount: $("bfAmount").value, usage: $("bfUsage").value,
+    unit: $("bfUnit").value, period_start: $("bfStart").value || null, period_end: $("bfEnd").value || null, due_date: $("bfDue").value || null};
+  const r = await fetch("/api/bills/save", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
+  if (!r.ok) { $("bfMsg").textContent = r.error || "Couldn't save"; return; }
+  $("bForm").hidden = true; loadBills();
+};
+$("bTable").addEventListener("click", async e => {
+  if (e.target.closest("#bMore")) { bShowAll = !bShowAll; renderBillTable(); return; }
+  const ed = e.target.closest("[data-edit]"), del = e.target.closest("[data-del]");
+  if (ed) billForm(bSum.bills.find(b => b.id === +ed.dataset.edit));
+  if (del) { if (del.dataset.armed) { await fetch(`/api/bills/${del.dataset.del}`, {method: "DELETE"}); loadBills(); }
+    else { del.dataset.armed = 1; del.textContent = "Confirm delete"; del.classList.add("danger"); setTimeout(() => { if (del.isConnected) { delete del.dataset.armed; del.textContent = "Delete"; del.classList.remove("danger"); } }, 4000); } }
+});
+$("bUpload").onclick = () => $("bFile").click();
+$("bFile").onchange = async () => { const fd = new FormData(); [...$("bFile").files].forEach(f => fd.append("file", f, f.name));
+  if (!$("bFile").files.length) return; $("bUpload").textContent = "Reading…";
+  const r = await fetch("/api/bills/upload", {method: "POST", body: fd}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
+  $("bUpload").textContent = r.ok ? `Added ${r.ids.length}` : "Upload failed"; setTimeout(() => $("bUpload").textContent = "Upload bill PDF", 3000); $("bFile").value = ""; loadBills(); };
+$("bScan").onclick = async () => { $("bScan").textContent = "Checking…";
+  const r = await fetch("/api/bills/scan", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
+  $("bScan").textContent = r.ok ? (r.added ? `Added ${r.added}` : "No new bills") : "Couldn't reach folder"; if (!r.ok) $("bInbox").textContent = "⚠ " + r.error;
+  setTimeout(() => $("bScan").textContent = "Check bills folder", 3000); loadBills(); };
+
+/* ---------- Sprinklers (Rachio) tab ---------- */
+let rSt = null, rHist = null, rWaterRows = [];
+async function loadRachio() {
+  try { [rSt, rHist, rWaterRows] = await Promise.all([j("/api/rachio"), j("/api/rachio/history?days=30"), j("/api/rachio/water")]); } catch (e) { return; }
+  const n = $("rNote");
+  n.style.display = !rSt.enabled || rSt.error ? "" : "none";
+  n.innerHTML = !rSt.enabled ? "Rachio isn't connected. In the Rachio app open <b>Account settings → Get API key</b>, and put it in the settings file as <code>RACHIO_API_KEY</code>." : rSt.error ? `<b>⚠ Rachio problem:</b> ${escapeHtml(rSt.error)}` : "";
+  renderRachio(); drawRachio();
+  j("/api/events?kind=rachio&limit=60").then(ev => $("rLog").innerHTML = ev.length ? ev.map(e => `<div><time>${dtstr(e.ts)}</time><span>${escapeHtml(e.message)}</span></div>`).join("") : `<div class="empty">Rain skips and manual runs will be listed here.</div>`).catch(() => {});
+}
+const mins = s => s == null ? "" : s >= 3600 ? `${Math.floor(s / 3600)} h ${Math.round(s % 3600 / 60)} min` : `${Math.ceil(s / 60)} min`;
+function renderRachio() {
+  const sk = rSt.skip || {}, last = sk.last;
+  $("rDev").innerHTML = rSt.devices.map(d => `
+    <div class="card"><h2>${escapeHtml(d.name || "Rachio")}</h2>
+      <div class="big3">${d.running ? `Watering ${escapeHtml(d.running.zone || "")}` : d.status === "ONLINE" ? "Idle" : "Offline"}</div>
+      <div class="sub" style="margin:4px 0 10px">${d.running ? `${mins(d.running.remaining_s)} left · ${escapeHtml(d.running.schedule || "")}` : (d.schedules || []).filter(r => r.enabled).map(r => escapeHtml(r.name)).join(" · ") || "No active schedules"}</div>
+      <div class="btnrow">${d.running ? `<button class="danger" data-act="stop" data-dev="${d.id}">Stop watering</button>` : ""}</div></div>
+    <div class="card"><h2>Rain delay</h2>
+      <div class="big3">${d.rain_delay_until ? `On until ${dtstr(d.rain_delay_until)}` : "Off"}</div>
+      <div class="sub" style="margin:4px 0 10px">Scheduled watering is skipped while a rain delay is on.</div>
+      <div class="btnrow">${d.rain_delay_until ? `<button data-act="rain_delay" data-dev="${d.id}" data-h="0">Clear delay</button>` : ""}<button data-act="rain_delay" data-dev="${d.id}" data-h="24">Delay 24 h</button><button data-act="rain_delay" data-dev="${d.id}" data-h="48">Delay 48 h</button></div></div>`).join("") +
+    `<div class="card"><h2>Smart rain skip</h2>
+      <div class="big3">${sk.enabled ? (sk.dry_run ? "On · dry run" : "On") : "Off"}</div>
+      <div class="sub" style="margin:4px 0 10px">${last ? (last.reasons.length ? "Skipping: " + escapeHtml(last.reasons.join("; ")) : `No skip needed: ${fmt(last.rain_24h, 2)} in fell in 24 h, ${fmt(last.expected_24h, 2)} in expected`) + ` · checked ${ago(last.ts)}` : "Uses your Tempest's rain, the forecast and freeze risk."}
+        <br>Skips when ≥ ${sk.rain_in} in fell, ≥ ${sk.forecast_in} in is expected, or the low is ≤ ${sk.freeze_f}°F.</div>
+      <div class="btnrow"><button data-act="skip" data-on="${sk.enabled ? 0 : 1}">${sk.enabled ? "Turn off" : "Turn on"}</button></div></div>`;
+  const zones = rSt.devices.flatMap(d => d.zones.map(z => Object.assign({dev: d.id}, z)));
+  $("rZones").innerHTML = zones.map(z => `<div class="card zc${z.enabled ? "" : " off"}">
+      <div class="zn">${escapeHtml(z.name || "Zone")} <small>zone ${z.number}${z.enabled ? "" : " · disabled"}</small></div>
+      <div class="meta"><span>Last: ${z.last_ts ? `${ago(z.last_ts)}, ${z.last_min} min${z.last_gal != null ? `, ~${fmt(z.last_gal)} gal` : ""}` : "never"}</span>
+        <span>This month: ${z.month_min} min${z.month_gal != null ? ` · ~${fmt(z.month_gal)} gal` : ""}</span></div>
+      <div class="run"><input type="number" min="1" max="180" value="10" id="zm-${z.id}" aria-label="Minutes"><span class="sub">min</span>
+        <button data-act="start" data-zone="${z.id}">Run</button></div></div>`).join("") || (rSt.enabled ? `<div class="empty">No zones found.</div>` : "");
+}
+function drawRachio() {
+  if (!rHist) return;
+  const days = []; for (let i = 29; i >= 0; i--) days.push(new Date(Date.now() - i * 86400000).toLocaleDateString("en-CA"));
+  const m = Object.fromEntries(rHist.daily.map(d => [d.day, d]));
+  bars($("rMin"), days.map(d => ({label: shortDay(d), v: {m: m[d] ? m[d].minutes : 0}, extra: m[d] && m[d].gallons ? `<br>~${fmt(m[d].gallons)} gal` : ""})), [{k: "m", l: "Watering", c: "var(--c3)"}], {u: " min", empty: "No watering in the last 30 days"});
+  bars($("rRain"), days.map(d => ({label: shortDay(d), v: {r: rHist.rain[d] || 0}})), [{k: "r", l: "Rain", c: "var(--s1)"}], {u: " in", dec: 2, empty: "No rain in the last 30 days"});
+  const tm = rHist.daily.reduce((a, d) => a + d.minutes, 0), tr = Object.values(rHist.rain).reduce((a, b) => a + (b || 0), 0);
+  $("rMinNow").textContent = `${fmt(tm)} min in 30 days`; $("rRainNow").textContent = `${fmt(tr, 2)} in in 30 days`;
+  $("rWater").innerHTML = `<tr><th>Month</th><th class="n">Sprinklers</th><th class="n">Est. gallons</th><th class="n">Water bill</th><th class="n">Sprinkler share</th></tr>` +
+    (rWaterRows.length ? rWaterRows.slice().reverse().map(w => `<tr><td>${new Date(w.month + "-15T12:00").toLocaleDateString([], {month: "long", year: "numeric"})}</td>
+      <td class="n">${w.minutes != null ? fmt(w.minutes) + " min" : ""}</td><td class="n">${w.irrigation_gal != null ? fmt(w.irrigation_gal) : ""}</td>
+      <td class="n">${w.bill_gal != null ? fmt(w.bill_gal) + " gal" : ""}${w.bill_amount != null ? ` · $${fmt(w.bill_amount, 2)}` : ""}</td>
+      <td class="n">${w.irrigation_gal && w.bill_gal ? fmt(w.irrigation_gal / w.bill_gal * 100) + "%" : ""}</td></tr>`).join("")
+      : `<tr><td colspan="5" class="empty">Builds up as the sprinklers run and water bills are added.</td></tr>`);
+}
+document.addEventListener("click", async e => {
+  const b = e.target.closest("#pgSprinklers [data-act]"); if (!b) return;
+  if (!b.dataset.armed && (b.dataset.act === "start" || b.dataset.act === "stop")) {   // two-step for anything that moves water
+    const label = b.textContent; b.dataset.armed = 1; b.textContent = b.dataset.act === "start" ? `Start ${$("zm-" + b.dataset.zone).value} min?` : "Confirm stop"; b.classList.add("primary");
+    setTimeout(() => { if (b.isConnected && b.dataset.armed) { delete b.dataset.armed; b.textContent = label; b.classList.remove("primary"); } }, 5000); return; }
+  const act = b.dataset.act, body = act === "start" ? {zone: b.dataset.zone, minutes: +$("zm-" + b.dataset.zone).value} : act === "skip" ? {enabled: b.dataset.on === "1"} : {device: b.dataset.dev, hours: +b.dataset.h};
+  b.disabled = true; b.textContent = "Sending…";
+  const r = await fetch(`/api/rachio/${act}`, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
+  if (!r.ok) { b.disabled = false; b.textContent = "Failed"; $("rNote").style.display = ""; $("rNote").innerHTML = `<b>⚠ ${escapeHtml(r.error || "Rachio didn't respond")}</b>`; return; }
+  loadRachio();
+});
+setInterval(() => { if (page === "sprinklers") loadRachio(); }, 60000);
 
 setTheme(savedTheme);
 showPage();

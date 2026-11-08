@@ -148,6 +148,39 @@ Outdoor by default, and Outdoor compares with the sensor named "Attic". Change i
 (saved on the server, so it's the same on every device). Expanded cards then show both temperatures plus a **Difference**
 chart (this sensor minus the other) with the average and range for the selected period.
 
+## Bills tab (`#bills`)
+
+Electric, water, gas and internet bills, month over month and year over year.
+
+- **PDF bills:** drop them in the **Bills** folder next to the backups on ReadySHARE
+  (`\\readyshare\Data\WeatherStation\Bills`, checked every 30 min, or click **Check bills folder**), or use **Upload bill PDF**.
+  The amount, usage, billing period and due date are read from the PDF text (Rhythm, AT&T, City of Round Rock and Atmos
+  are recognized by name; others by their units). If a local Ollama model is running on the EdgeXpert (`OLLAMA_URL`,
+  default `http://127.0.0.1:11434`, `OLLAMA_MODEL` optional) it fills in anything the patterns miss. Anything still missing
+  is marked **Needs review**; click **Edit** to fix it. Scanned (image-only) PDFs can't be read; add those by hand.
+- **Smart Meter Texas:** with `SMT_USERNAME` / `SMT_PASSWORD` (your smartmetertexas.com login) the monitor downloads your
+  meter's 15-minute readings (`SMT_BACKFILL_DAYS`=60 to start, then daily) and shows electricity per day next to the outdoor
+  temperature. `SMT_ESIID` picks the meter if the account has more than one. This uses the same unofficial API as the Home
+  Assistant integration and may break if Smart Meter Texas changes their site.
+- Cards show the latest bill per utility with the change from the last bill and the same month last year (and ¢/kWh);
+  the monthly cost chart stacks the four bills and shows cooling/heating degree-days from the Tempest on hover.
+
+## Sprinklers tab (`#sprinklers`, Rachio)
+
+Set `RACHIO_API_KEY` (Rachio app → Account settings → Get API key).
+
+- **Status:** controller, what's watering now and time left, schedules, rain delay.
+- **History:** every zone run is recorded (from Rachio's last-watered time and duration) with estimated gallons
+  (zone nozzle rate × area from the Rachio app). Watering minutes per day sit next to the Tempest's rain per day.
+- **Smart rain skip:** checked every 10 minutes. Sets a `RACHIO_SKIP_HOURS` (24) rain delay when the Tempest measured
+  ≥ `RACHIO_SKIP_RAIN_IN` (0.25 in) in the last 24 h, the forecast expects ≥ `RACHIO_SKIP_FORECAST_IN` (0.25 in) in the next
+  24 h, or the forecast low is ≤ `RACHIO_SKIP_FREEZE_F` (35°F). `RACHIO_SKIP_DRY_RUN=true` only logs what it would do.
+  Turn it on or off on the tab.
+- **Manual control:** run a zone for N minutes, stop watering, set or clear a 24 h / 48 h rain delay. Starting and stopping
+  ask for a second click to confirm.
+- **Sprinklers vs water bill:** estimated sprinkler gallons per month next to the water bill's gallons.
+- About 300 of Rachio's 1,700 daily API calls are used.
+
 ## History (year over year)
 
 Everything is kept: every 1-minute Tempest observation, every lightning strike, every YoLink reading, in `data/tempest.db`.
@@ -209,7 +242,7 @@ In testing on synthetic frames the sizes came out within about 1–2 mm.
 These endpoints are useful for Home Assistant, Grafana, or your LLM stack:
 
 `/api/state` · `/api/history?hours=24` · `/api/rapid?minutes=30` · `/api/strikes?hours=24` ·
-`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/wind_rose?hours=24` · `/api/yolink/sensors` · `/api/yolink/history?hours=24&device=<id>` · `/api/history/sources` · `/api/history/yoy?source=out&metric=temp` · `/api/history/summary` · `/api/history/export.csv` · `/api/hailcam` · `/api/hailcam/image` · `POST /api/hailcam/test` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
+`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/wind_rose?hours=24` · `/api/yolink/sensors` · `/api/yolink/history?hours=24&device=<id>` · `/api/history/sources` · `/api/history/yoy?source=out&metric=temp` · `/api/history/summary` · `/api/history/export.csv` · `/api/bills` · `/api/smt/daily` · `/api/rachio` · `/api/rachio/history` · `/api/hailcam` · `/api/hailcam/image` · `POST /api/hailcam/test` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
 `POST /api/test-ifttt`
 
 ## Notes
