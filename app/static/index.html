@@ -288,7 +288,7 @@ button.danger{box-shadow:inset 0 0 0 1px var(--critical);color:var(--critical)}
       <div class="notice card" id="bNote" style="display:none"></div>
       <section class="card form" id="bForm" hidden>
         <input type="hidden" id="bfId">
-        <label>Bill type<select id="bfUtility"><option value="electric">Electric</option><option value="water">Water</option><option value="gas">Gas</option><option value="internet">Internet</option></select></label>
+        <label>Bill type<select id="bfUtility"><option value="electric">Electric</option><option value="water">Water</option><option value="gas">Gas</option><option value="internet">Internet</option><option value="mobile">Mobile phone</option><option value="phone">Home phone</option></select></label>
         <label>Provider<input id="bfProvider" placeholder="Rhythm"></label>
         <label>Amount ($)<input id="bfAmount" inputmode="decimal"></label>
         <label>Usage<input id="bfUsage" inputmode="decimal"></label>
@@ -935,7 +935,7 @@ const shortDay = d => new Date(d + "T12:00").toLocaleDateString([], {month: "sho
 const monthLabel = m => new Date(m + "-15T12:00").toLocaleDateString([], {month: "short", year: "2-digit"});
 
 /* ---------- Bills tab ---------- */
-const UTIL = {electric: ["Electric", "var(--c4)"], water: ["Water", "var(--c1)"], gas: ["Gas", "var(--c2)"], internet: ["Internet", "var(--c7)"]};
+const UTIL = {electric: ["Electric", "var(--c4)"], water: ["Water", "var(--c1)"], gas: ["Gas", "var(--c2)"], internet: ["Internet", "var(--c7)"], mobile: ["Mobile phone", "var(--c3)"], phone: ["Home phone", "var(--c5)"]};
 let bSum = null, bMon = null, smt = [];
 async function loadBills() {
   try { [bSum, bMon, smt] = await Promise.all([j("/api/bills"), j("/api/bills/monthly"), j("/api/smt/daily?days=60")]); } catch (e) { return; }

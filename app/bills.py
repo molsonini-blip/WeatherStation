@@ -1,5 +1,5 @@
 """
-Monthly bills: electric, water, gas, internet.
+Monthly bills: electric, water, gas, internet, mobile phone, home phone.
 
 Bills arrive as PDFs, either dropped in the network folder (BILLS_SMB_PATH, default the Bills folder next to the
 backups on ReadySHARE) or uploaded on the dashboard. Text is pulled out of the PDF and the amount, usage and billing
@@ -24,8 +24,9 @@ from zoneinfo import ZoneInfo
 
 log = logging.getLogger("tempest.bills")
 
-UTILITIES = ("electric", "water", "gas", "internet")
-UNITS = {"electric": "kWh", "water": "gal", "gas": "therms", "internet": ""}
+UTILITIES = ("electric", "water", "gas", "internet", "mobile", "phone")
+UNITS = {"electric": "kWh", "water": "gal", "gas": "therms", "internet": "", "mobile": "GB", "phone": ""}
+NO_USAGE = ("internet", "phone")  # bills with nothing metered worth charting
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS bills (id INTEGER PRIMARY KEY AUTOINCREMENT, utility TEXT, provider TEXT,
@@ -36,6 +37,9 @@ CREATE TABLE IF NOT EXISTS smt_daily (day TEXT PRIMARY KEY, kwh REAL, n INTEGER)
 """
 
 PROVIDERS = [  # (pattern, provider name, utility)
+    (r"google fi\b|fi\.google\.com", "Google Fi", "mobile"),
+    (r"verizon wireless|t-mobile|tmobile|mint mobile|visible wireless|cricket wireless|us mobile", None, "mobile"),
+    (r"\booma\b|vonage|magicjack", None, "phone"),
     (r"\brhythm\b", "Rhythm", "electric"),
     (r"\btxu\b", "TXU Energy", "electric"),
     (r"reliant", "Reliant", "electric"),
@@ -49,6 +53,8 @@ PROVIDERS = [  # (pattern, provider name, utility)
 ]
 
 FOLDER_HINTS = [  # sub-folder name in the Bills folder -> (provider, utility)
+    (r"google ?fi", "Google Fi", "mobile"), (r"mobile|wireless|cell", None, "mobile"),
+    (r"home ?phone|landline|voip", None, "phone"),
     (r"rhythm", "Rhythm", "electric"), (r"txu", "TXU Energy", "electric"), (r"atmos", "Atmos Energy", "gas"),
     (r"\batt\b|at&t|at ?& ?t", "AT&T Fiber", "internet"), (r"brushy creek", "Brushy Creek MUD", "water"),
     (r"round rock", "City of Round Rock", "water"), (r"water|mud", None, "water"), (r"gas", None, "gas"),
@@ -100,7 +106,7 @@ def valid_period(start, end, today=None):
     return 5 <= (e - s).days <= 70 and e <= today + timedelta(days=45) and e.year >= 2000
 
 
-PARSER_VERSION = 4  # bump when extract() changes: stored PDFs are re-read on the next start
+PARSER_VERSION = 5  # bump when extract() changes: stored PDFs are re-read on the next start
 
 
 def money(s):
@@ -135,6 +141,19 @@ def extract(text: str) -> dict:
             out["utility"] = "gas"
         elif re.search(r"internet|fiber|broadband|mbps|gbps", low):
             out["utility"] = "internet"
+        elif re.search(r"wireless|mobile|talk ?& ?text|\bdata (?:usage|used)", low):
+            out["utility"] = "mobile"
+        elif re.search(r"home phone|landline|long distance|local service", low):
+            out["utility"] = "phone"
+    if out["provider"] and out["provider"].startswith("AT&T"):
+        # AT&T bills cover several services; the service summary says which one this bill is for
+        summ = re.search(r"service summary([\s\S]{0,400}?)total services", low)
+        svc = summ.group(1) if summ else low[:3000]
+        kinds = [k for k, pat in (("internet", r"internet|fiber"), ("mobile", r"wireless|mobile"),
+                                  ("phone", r"home phone|digital phone|voice|landline")) if re.search(pat, svc)]
+        if len(kinds) == 1:
+            out["utility"] = kinds[0]
+            out["provider"] = {"internet": "AT&T Fiber", "mobile": "AT&T Wireless", "phone": "AT&T Phone"}[kinds[0]]
 
     # amount: the clearest "amount due" style label wins
     # actual charges first: with budget / average billing (Atmos, TXU) the "amount due" is a fixed monthly figure
@@ -155,7 +174,8 @@ def extract(text: str) -> dict:
     pats = {"electric": [(r"([\d,]+(?:\.\d+)?)\s*kwh", "kWh")],
             "water": [(r"([\d,]+(?:\.\d+)?)\s*(?:gallons|gal)\b", "gal"), (r"([\d,]+(?:\.\d+)?)\s*kgal", "kgal")],
             "gas": [(r"([\d,]+(?:\.\d+)?)\s*therms?", "therms"), (r"([\d,]+(?:\.\d+)?)\s*ccf", "ccf"),
-                    (r"([\d,]+(?:\.\d+)?)\s*mcf", "mcf")]}.get(u, [])
+                    (r"([\d,]+(?:\.\d+)?)\s*mcf", "mcf")],
+            "mobile": [(r"([\d,]+(?:\.\d+)?)\s*gb\b", "GB")]}.get(u, [])
     reads = (re.search(r"current meter read[\s\S]{0,40}?([\d,]+)\s*kwh", low),
              re.search(r"previous meter read[\s\S]{0,40}?([\d,]+)\s*kwh", low))
     m = re.search(r"usage in (ccf|therms?|mcf|gallons|kwh):?\s*([\d,]+(?:\.\d+)?)", low)
@@ -171,6 +191,8 @@ def extract(text: str) -> dict:
         for line in low.splitlines():
             if re.search(r"average|avg|per day|daily|previous|last year|meter read|renewable|equivalent", line):
                 continue
+            if u == "mobile" and not re.search(r"data|used|usage", line):
+                continue  # plan allowances ("unlimited 50 GB") aren't usage
             for x in re.findall(pat, line):
                 v = float(x.replace(",", ""))
                 if v > 0:
@@ -182,8 +204,8 @@ def extract(text: str) -> dict:
                 val, unit = val * 1000, "gal"
             out["usage"], out["unit"] = val, unit
             break
-    if u == "internet":
-        out["unit"] = ""
+    if u in NO_USAGE:
+        out["usage"], out["unit"] = None, ""
 
     # budget / average monthly billing: the fixed monthly amount and the running balance
     # (balance > 0 = actual charges ran ahead of the payments, you owe it; < 0 = credit)
@@ -256,7 +278,7 @@ async def ollama_extract(http, text: str, have: dict) -> dict:
     if not model:
         return {}
     prompt = ("Extract these fields from the utility bill text below and reply with JSON only: "
-              "utility (one of electric, water, gas, internet), provider, amount (total amount due, number), "
+              "utility (one of electric, water, gas, internet, mobile, phone), provider, amount (total amount due, number), "
               "usage (number, for the billing period), unit (kWh, gal, therms, ccf or empty), period_start, period_end, "
               "due_date (dates as YYYY-MM-DD). Use null when unknown.\n\nBILL:\n" + text[:6000])
     try:
@@ -341,7 +363,7 @@ class Bills:
         fields = extract(text)
         apply_hint(fields, name)
         missing = [k for k in ("utility", "amount", "usage", "period_end") if fields.get(k) is None
-                   and not (k == "usage" and fields.get("utility") == "internet")]
+                   and not (k == "usage" and fields.get("utility") in NO_USAGE)]
         if missing and text and self.mon.http:
             for k, v in (await ollama_extract(self.mon.http, text, fields)).items():
                 if fields.get(k) is None:
@@ -370,12 +392,12 @@ class Bills:
         return bid
 
     async def reparse(self, force=False):
-        """Re-read every stored PDF with the current parser. Bills corrected by hand are left alone."""
+        """Re-read every stored PDF with the current parser. On bills corrected by hand only blanks are filled in."""
         if not force and (self.db.kv_get("bills_parser", 0) or 0) >= PARSER_VERSION:
             return 0
         loop = asyncio.get_running_loop()
         changed = 0
-        for row in self.db.q("SELECT * FROM bills WHERE file IS NOT NULL AND COALESCE(edited,0)=0"):
+        for row in self.db.q("SELECT * FROM bills WHERE file IS NOT NULL"):
             path = self.dir / row["file"]
             if not path.is_file():
                 continue
@@ -391,9 +413,12 @@ class Bills:
             clean_fields(f)
             keys = ("utility", "provider", "period_start", "period_end", "bill_date", "due_date", "amount", "usage",
                     "unit", "budget_amount", "budget_balance")
-            new = {k: f.get(k) for k in keys}
-            new["status"] = "ok" if all(new.get(k) is not None for k in ("utility", "amount", "period_end")) else "review"
-            if any(row[k] != v for k, v in new.items()):
+            if row.get("edited"):
+                new = {k: f[k] for k in keys if row[k] in (None, "") and f.get(k) not in (None, "")}
+            else:
+                new = {k: f.get(k) for k in keys}
+                new["status"] = "ok" if all(new.get(k) is not None for k in ("utility", "amount", "period_end")) else "review"
+            if new and any(row[k] != v for k, v in new.items()):
                 self.db.x(f"UPDATE bills SET {', '.join(k + '=?' for k in new)} WHERE id=?", (*new.values(), row["id"]))
                 changed += 1
         # the same bill read twice (now that dates are known): keep the first
@@ -596,7 +621,7 @@ def register(app_router, web, mon, bills: Bills):
         for k in ("amount", "usage", "budget_amount", "budget_balance"):
             fields[k] = None if fields[k] in (None, "") else float(fields[k])
         if fields["utility"] not in UTILITIES:
-            return web.json_response(dict(ok=False, error="pick electric, water, gas or internet"), status=400)
+            return web.json_response(dict(ok=False, error="pick electric, water, gas, internet, mobile or phone"), status=400)
         fields["unit"] = fields["unit"] or UNITS[fields["utility"]]
         if b.get("id"):
             sets = ", ".join(f"{k}=?" for k in fields)

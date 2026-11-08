@@ -150,7 +150,8 @@ chart (this sensor minus the other) with the average and range for the selected 
 
 ## Bills tab (`#bills`)
 
-Electric, water, gas and internet bills, month over month and year over year.
+Electric, water, gas, internet, mobile phone and home phone bills, month over month and year over year. Put each
+provider in its own sub-folder (e.g. `Google Fi`, `ATT`); a folder named for the service (`Mobile`, `Home Phone`) also works.
 
 - **Bills from Google Drive:** `tools/windows/install_bill_sync.bat` (run once on malaga-office) creates an hourly Windows
   task that copies new PDFs from `G:\My Drive\Documents\Personal\Bills` (sub-folders per provider) to the ReadySHARE
