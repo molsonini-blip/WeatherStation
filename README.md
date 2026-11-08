@@ -152,6 +152,10 @@ chart (this sensor minus the other) with the average and range for the selected 
 
 Electric, water, gas and internet bills, month over month and year over year.
 
+- **Bills from Google Drive:** `tools/windows/install_bill_sync.bat` (run once on malaga-office) creates an hourly Windows
+  task that copies new PDFs from `G:\My Drive\Documents\Personal\Bills` (sub-folders per provider) to the ReadySHARE
+  Bills folder below. Folder names (Atmos, TXU, Rhythm Energy, ATT, Brushy Creek Mud) tell the dashboard which bill it is;
+  Electricity Facts Labels are skipped.
 - **PDF bills:** drop them in the **Bills** folder next to the backups on ReadySHARE
   (`\\readyshare\Data\WeatherStation\Bills`, checked every 30 min, or click **Check bills folder**), or use **Upload bill PDF**.
   The amount, usage, billing period and due date are read from the PDF text (Rhythm, AT&T, City of Round Rock and Atmos

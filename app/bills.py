@@ -48,6 +48,25 @@ PROVIDERS = [  # (pattern, provider name, utility)
     (r"brushy creek mud|municipal utility district|\bmud\b", None, "water"),
 ]
 
+FOLDER_HINTS = [  # sub-folder name in the Bills folder -> (provider, utility)
+    (r"rhythm", "Rhythm", "electric"), (r"txu", "TXU Energy", "electric"), (r"atmos", "Atmos Energy", "gas"),
+    (r"\batt\b|at&t|at ?& ?t", "AT&T Fiber", "internet"), (r"brushy creek", "Brushy Creek MUD", "water"),
+    (r"round rock", "City of Round Rock", "water"), (r"water|mud", None, "water"), (r"gas", None, "gas"),
+    (r"electric|power|energy", None, "electric"), (r"internet|fiber", None, "internet"),
+]
+NOT_A_BILL = r"electricity facts label|\befl\b|terms of service|your rights as a customer"
+
+
+def folder_hint(path: str):
+    """(provider, utility) suggested by the folder a PDF was found in, e.g. 'TXU/TXU - 26-05.pdf'."""
+    parts = path.replace("\\", "/").lower().split("/")[:-1]
+    for part in reversed(parts):
+        for pat, prov, util in FOLDER_HINTS:
+            if re.search(pat, part):
+                return prov, util
+    return None, None
+
+
 MONTHS = "jan|feb|mar|apr|may|jun|jul|aug|sep|sept|oct|nov|dec"
 DATE_RE = (rf"(?:\d{{1,2}}/\d{{1,2}}/\d{{2,4}}|\d{{4}}-\d{{2}}-\d{{2}}|"
            rf"(?:{MONTHS})[a-z]*\.? \d{{1,2}},? \d{{4}})")
@@ -104,8 +123,10 @@ def extract(text: str) -> dict:
             out["utility"] = "internet"
 
     # amount: the clearest "amount due" style label wins
-    for label in (r"total amount due", r"amount due", r"total due", r"please pay", r"balance due",
-                  r"total current charges", r"current charges", r"new charges", r"total charges"):
+    # actual charges first: with budget / average billing (Atmos, TXU) the "amount due" is a fixed monthly figure
+    for label in (r"current gas charge total", r"service address charges subtotal", r"total current charges",
+                  r"total amount due", r"amount due", r"total due", r"please pay", r"balance due",
+                  r"current charges", r"new charges", r"total charges"):
         m = re.search(label + r"[^$\d\n]{0,40}\$?\s*(-?[\d,]+\.\d{2})", low)
         if m:
             out["amount"] = money(m.group(1))
@@ -121,10 +142,20 @@ def extract(text: str) -> dict:
             "water": [(r"([\d,]+(?:\.\d+)?)\s*(?:gallons|gal)\b", "gal"), (r"([\d,]+(?:\.\d+)?)\s*kgal", "kgal")],
             "gas": [(r"([\d,]+(?:\.\d+)?)\s*therms?", "therms"), (r"([\d,]+(?:\.\d+)?)\s*ccf", "ccf"),
                     (r"([\d,]+(?:\.\d+)?)\s*mcf", "mcf")]}.get(u, [])
+    reads = (re.search(r"current meter read[\s\S]{0,40}?([\d,]+)\s*kwh", low),
+             re.search(r"previous meter read[\s\S]{0,40}?([\d,]+)\s*kwh", low))
+    m = re.search(r"usage in (ccf|therms?|mcf|gallons|kwh):?\s*([\d,]+(?:\.\d+)?)", low)
+    if u == "electric" and all(reads):
+        pats = []
+        out["usage"], out["unit"] = float(reads[0].group(1).replace(",", "")) - float(reads[1].group(1).replace(",", "")), "kWh"
+    elif m:
+        pats = []
+        unit = {"gallons": "gal", "therm": "therms"}.get(m.group(1), m.group(1))
+        out["usage"], out["unit"] = float(m.group(2).replace(",", "")), "kWh" if unit == "kwh" else unit
     for pat, unit in pats:
         cands = []  # (is_labeled_total, value) from lines that aren't per-day averages
         for line in low.splitlines():
-            if re.search(r"average|avg|per day|daily|previous|last year", line):
+            if re.search(r"average|avg|per day|daily|previous|last year|meter read|renewable|equivalent", line):
                 continue
             for x in re.findall(pat, line):
                 v = float(x.replace(",", ""))
@@ -140,16 +171,25 @@ def extract(text: str) -> dict:
     if u == "internet":
         out["unit"] = ""
 
-    # dates
-    m = re.search(rf"(?:service|billing|statement|meter read)? ?(?:period|dates?|from)[^\n]{{0,25}}?({DATE_RE})\s*(?:-|–|to|through|thru)\s*({DATE_RE})", low)
+    # dates: billing period, most specific layout first
+    SEP = r"\s*(?:--|-|–|to|through|thru)\s*"
+    D = r"(\d{1,2}/\d{1,2}/\d{2,4})"
+    m = (re.search(rf"service period:?\s*({DATE_RE}){SEP}({DATE_RE})", low)
+         or re.search(rf"{D}\s+\d{{3,7}}\s+{D}\s+\d{{3,7}}\s+\d", low)          # TXU: date read date read usage
+         or re.search(rf"{D}\s+{D}\s+\d{{3,7}}\s+\d{{3,7}}", low)                # Atmos: meter, from, to, reads
+         or re.search(rf"(?:service|billing|statement)? ?(?:period|dates?|from)[^\n]{{0,25}}?({DATE_RE}){SEP}({DATE_RE})", low))
     if not m:
-        m = re.search(rf"({DATE_RE})\s*(?:-|–|to|through|thru)\s*({DATE_RE})", low)
+        for mm in re.finditer(rf"({DATE_RE}){SEP}({DATE_RE})", low):
+            if not re.search(r"contract|term|plan", low[max(0, mm.start() - 60):mm.start()]):
+                m = mm
+                break
     if m:
         out["period_start"], out["period_end"] = parse_date(m.group(1)), parse_date(m.group(2))
-    m = re.search(rf"(?:due (?:date|by|on)?|pay by)[^\n]{{0,15}}?({DATE_RE})", low)
+    m = (re.search(rf"amount due\s*on\s*({DATE_RE})", low)
+         or re.search(rf"(?:due date|payment due|pay by|due by|due on)[\s\S]{{0,60}}?({DATE_RE})", low))
     if m:
         out["due_date"] = parse_date(m.group(1))
-    m = re.search(rf"(?:bill|statement|invoice) date[^\n]{{0,15}}?({DATE_RE})", low)
+    m = re.search(rf"(?:bill|billing|statement|invoice) date:?\s*({DATE_RE})", low)
     if m:
         out["bill_date"] = parse_date(m.group(1))
     return out
@@ -193,7 +233,10 @@ class Bills:
 
     # ------------------------------------------------------------------ ingest
     async def ingest_pdf(self, name: str, data: bytes, source: str):
-        safe = re.sub(r"[^\w.\- ]", "_", name)[-120:] or "bill.pdf"
+        if re.search(NOT_A_BILL, name.lower()):
+            log.info("skipping %s (not a bill)", name)
+            return None
+        safe = re.sub(r"[^\w.\- ]", "_", name.replace("/", " - "))[-120:] or "bill.pdf"
         path = self.dir / f"{int(time.time())}-{safe}"
         path.write_bytes(data)
         try:
@@ -201,7 +244,16 @@ class Bills:
         except Exception as e:
             text = ""
             log.warning("could not read %s: %s", name, e)
+        if text and re.search(NOT_A_BILL, text[:1500].lower()) and not re.search(r"amount due|total due", text.lower()):
+            log.info("skipping %s (looks like a facts label, not a bill)", name)
+            path.unlink(missing_ok=True)
+            return None
         fields = extract(text)
+        hp, hu = folder_hint(name)
+        if hu and (fields["utility"] is None or fields["utility"] != hu and hp):
+            fields["utility"] = hu
+        if hp and not fields["provider"]:
+            fields["provider"] = hp
         missing = [k for k in ("utility", "amount", "usage", "period_end") if fields.get(k) is None
                    and not (k == "usage" and fields.get("utility") == "internet")]
         if missing and text and self.mon.http:
@@ -217,6 +269,13 @@ class Bills:
             fields["utility"] = None
         fields["unit"] = fields.get("unit") or UNITS.get(fields.get("utility") or "", "")
         ok = all(fields.get(k) is not None for k in ("utility", "amount", "period_end"))
+        if fields.get("period_end") and fields.get("amount") is not None:
+            dup = self.db.q("SELECT id FROM bills WHERE utility=? AND period_end=? AND ABS(amount-?)<0.01",
+                            (fields["utility"], fields["period_end"], fields["amount"]))
+            if dup:
+                path.unlink(missing_ok=True)
+                log.info("%s is already in the list (bill %s)", name, dup[0]["id"])
+                return dup[0]["id"]
         status = "ok" if ok else "review"
         bid = self.db.x("""INSERT INTO bills (utility, provider, period_start, period_end, bill_date, due_date, amount, usage,
                            unit, status, file, source, notes, created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
@@ -243,15 +302,20 @@ class Bills:
         smbclient.makedirs(root, exist_ok=True, port=port)
         seen = set(self.db.kv_get("bills_seen", []) or [])
         new = []
-        for name in smbclient.listdir(root, port=port):
-            if not name.lower().endswith(".pdf"):
-                continue
-            st = smbclient.stat(f"{root}\\{name}", port=port)
-            key = f"{name}|{st.st_size}"
-            if key in seen:
-                continue
-            with smbclient.open_file(f"{root}\\{name}", mode="rb", port=port) as fh:
-                new.append((key, name, fh.read()))
+        for dirpath, _dirs, files in smbclient.walk(root, port=port):
+            rel_dir = dirpath[len(root):].strip("\\").replace("\\", "/")
+            for name in files:
+                if not name.lower().endswith(".pdf"):
+                    continue
+                rel = f"{rel_dir}/{name}" if rel_dir else name
+                st = smbclient.stat(f"{dirpath}\\{name}", port=port)
+                key = f"{rel}|{st.st_size}"
+                if key in seen:
+                    continue
+                with smbclient.open_file(f"{dirpath}\\{name}", mode="rb", port=port) as fh:
+                    new.append((key, rel, fh.read()))
+                if len(new) >= 40:  # big first import: take it in batches
+                    return new
         return new
 
     async def inbox_loop(self):
@@ -267,6 +331,8 @@ class Bills:
                     seen.add(key)
                 self.db.kv_set("bills_seen", sorted(seen))
                 self.status.update(last_scan=int(time.time()), error=None)
+                if len(new) >= 40:
+                    continue  # more waiting (first big import): keep going
             except Exception as e:
                 self.status.update(last_scan=int(time.time()), error=str(e).splitlines()[0][:200])
                 log.warning("bills inbox %s: %s", self.smb_path, e)
