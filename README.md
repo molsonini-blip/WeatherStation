@@ -122,6 +122,11 @@ Sensor alarms (the limits you set in the YoLink app: too warm/cold, too humid/dr
 offline (no report for `YOLINK_OFFLINE_HOURS`=6 hours) are recorded in the **Sensor log** on the YoLink tab, with the
 reading and the limit, plus when each one cleared. No notifications are sent; the YoLink app already does that.
 
+**Compare / delta:** every card shows how much warmer or colder it is than another source right now. Sensors compare with
+Outdoor by default, and Outdoor compares with the sensor named "Attic". Change it with **Compare with** in an expanded card
+(saved on the server, so it's the same on every device). Expanded cards then show both temperatures plus a **Difference**
+chart (this sensor minus the other) with the average and range for the selected period.
+
 ## History (year over year)
 
 Everything is kept: every 1-minute Tempest observation, every lightning strike, every YoLink reading, in `data/tempest.db`.

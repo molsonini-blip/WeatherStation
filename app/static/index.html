@@ -631,6 +631,7 @@ function mchart(svg, list, opt = {}) {
     const lab = span > 20 * 86400 ? new Date(t * 1000).toLocaleDateString([], {month: "short", day: "numeric"}) : span > 2 * 86400 ? new Date(t * 1000).toLocaleDateString([], {weekday: "short", hour: "numeric"}) : new Date(t * 1000).toLocaleTimeString([], {hour: "numeric"});
     g += `<text x="${X(t)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === nx ? "end" : "middle"}">${lab}</text>`; }
   g += `<line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="var(--axis)"/>`;
+  if (opt.zeroline && lo < 0 && hi > 0) g += `<line x1="${L}" x2="${W - R}" y1="${Y(0)}" y2="${Y(0)}" stroke="var(--ink-3)" stroke-width="1.5"/>`;
   list.forEach(s => { let d = "", prev = null;
     s.rows.forEach(r => { if (r.v == null) return; const brk = prev == null || r.ts - prev > (opt.gap || 3 * 3600);
       d += `${brk ? "M" : "L"}${X(r.ts).toFixed(1)},${Y(r.v).toFixed(1)}`; prev = r.ts; });
@@ -659,6 +660,20 @@ const ylColor = i => i < 8 ? `var(--c${i + 1})` : "var(--ink-3)";
 const battery = b => b == null ? "" : `<span class="bat${b <= 1 ? " low" : ""}" title="Battery ${b}/4">${[1, 2, 3, 4].map(k => `<i class="${k <= b ? "f" : ""}"></i>`).join("")}</span>`;
 const ALARM = {lowBattery: ["crit", "Low battery"], lowTemp: ["warn", "Too cold"], highTemp: ["warn", "Too warm"], lowHumidity: ["warn", "Too dry"], highHumidity: ["warn", "Too humid"]};
 const ylOpen = {};  // sensor id -> hours shown in its expanded history
+let ylPairs = {};    // sensor id -> id it's compared with ("out" = Tempest outdoor)
+const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+const sgn = v => (v > 0 ? "+" : v < 0 ? "−" : "±") + fmt(Math.abs(v), 1) + "°F";
+const nameOf = id => id === "out" ? "Outdoor" : ((ylSnap && ylSnap.sensors.find(x => x.id === id)) || {}).name || id;
+const curTemp = id => id === "out" ? ylSnap.outdoor.temp_f : ((ylSnap.sensors.find(x => x.id === id)) || {}).temp_f;
+function deltaLine(id, t) {
+  const o = ylPairs[id]; if (!o || t == null || curTemp(o) == null) return "";
+  const dlt = t - curTemp(o);
+  return `<div class="meta" style="margin-top:4px"><span>Δ <b style="color:var(--ink)">${Math.abs(dlt) < .05 ? "same as" : `${fmt(Math.abs(dlt), 1)}°F ${dlt > 0 ? "warmer" : "colder"} than`}</b> ${escapeHtml(nameOf(o))}</span></div>`;
+}
+function cmpOptions(id) {
+  const opts = [["", "Nothing"], ["out", "Outdoor"]].concat((ylSnap.sensors || []).map(x => [x.id, x.name])).filter(o => o[0] !== id);
+  return opts.map(([v, l]) => `<option value="${escapeHtml(v)}"${(ylPairs[id] || "") === v ? " selected" : ""}>${escapeHtml(l)}</option>`).join("");
+}
 function renderYolinkCards() {
   const s = ylSnap; if (!s) return;
   const n = $("ylNotice");
@@ -671,19 +686,22 @@ function renderYolinkCards() {
     return `<div class="card ylc${id === "out" ? " out" : ""}${open ? " open" : ""}" data-id="${id}" role="button" tabindex="0" aria-expanded="${open}">
     <div class="nm"><span title="${escapeHtml(name)}">${escapeHtml(name)}</span>${x.badge || ""}</div>
     <div class="top"><div class="tv">${fmt(x.temp_f, 1)}<small>°F</small></div><div class="hum">${fmt(x.humidity)}<small>% humidity</small></div></div>
-    <div class="meta">${x.meta || ""}</div>${x.pills || ""}
+    <div class="meta">${x.meta || ""}</div>${deltaLine(id, x.temp_f)}${x.pills || ""}
     <div class="more">${open ? "▾ Hide history" : "▸ Show history"}</div>
     <div class="ylhist">${open ? `
       <div class="hhead"><div class="seg ylr">${[[24, "24h"], [72, "3d"], [168, "7d"], [720, "30d"]].map(([h, l]) => `<button data-h="${h}" aria-pressed="${h === hrs}">${l}</button>`).join("")}</div>
-        <span class="stats3" id="ylS-${id}"></span><span style="flex:1"></span><a href="#history" data-yoy="${id}" style="color:var(--s1);font-weight:600;text-decoration:none;font-size:13px">Year over year →</a></div>
-      <h3>Temperature °F <span class="legend"><span><i style="background:var(--s1)"></i>${id === "out" ? "Outdoor" : escapeHtml(name)}</span>${id === "out" ? "" : `<span><i style="background:var(--ink-3)"></i>Outdoor</span>`}</span></h3>
+        <span class="stats3" id="ylS-${id}"></span><span style="flex:1"></span>
+        <label class="sub" style="font-size:12.5px">Compare with <select class="ylcmp" data-id="${id}">${cmpOptions(id)}</select></label>
+        <a href="#history" data-yoy="${id}" style="color:var(--s1);font-weight:600;text-decoration:none;font-size:13px">Year over year →</a></div>
+      <h3>Temperature °F <span class="legend"><span><i style="background:var(--s1)"></i>${escapeHtml(name)}</span>${ylPairs[id] ? `<span><i style="background:var(--ink-3)"></i>${escapeHtml(nameOf(ylPairs[id]))}</span>` : ""}</span></h3>
       <svg class="viz" id="ylT-${id}"></svg>
+      ${ylPairs[id] ? `<h3>Difference: ${escapeHtml(name)} minus ${escapeHtml(nameOf(ylPairs[id]))} °F <span class="legend" id="ylDS-${id}"></span></h3><svg class="viz h" id="ylD-${id}"></svg>` : ""}
       <h3>Humidity %</h3><svg class="viz h" id="ylH-${id}"></svg>` : ""}</div></div>`; };
-  let h = s.sensors.map(x => card(x.id, x.name, Object.assign({}, x, {
+  let h = card("out", "Outdoor (Tempest)", {temp_f: o.temp_f, humidity: o.humidity, meta: "<span>live</span>"});
+  h += s.sensors.map(x => card(x.id, x.name, Object.assign({}, x, {
       badge: x.offline ? ` <span class="pill crit" title="No report since ${x.ts ? dtstr(x.ts) : "ever"}">Offline</span>` : "",
       meta: `<span>24h ${fmt(x.lo24_f, 1)}°–${fmt(x.hi24_f, 1)}°</span><span>${battery(x.battery)}</span><span>${x.ts ? ago(x.ts) : ""}</span>`,
       pills: (x.alarm || []).filter(a => ALARM[a]).map(a => `<span class="pill ${ALARM[a][0]}" style="margin-top:6px">${ALARM[a][1]}</span>`).join(" ")}))).join("");
-  h += card("out", "Outdoor (Tempest)", {temp_f: o.temp_f, humidity: o.humidity, meta: "<span>live</span>"});
   $("ylCards").innerHTML = h;
   Object.keys(ylOpen).forEach(drawCardHistory);
   $("ylTable").innerHTML = `<tr><th>Sensor</th><th>Model</th><th class="n">Temp</th><th class="n">Humidity</th><th class="n">24h low / high</th><th class="n">Battery</th><th class="n">Last report</th></tr>` +
@@ -695,17 +713,27 @@ async function drawCardHistory(id) {
   const now = Date.now() / 1000, x0 = now - hrs * 3600, gap = hrs > 168 ? 6 * 3600 : 3 * 3600;
   const pts = (rows, k) => rows.map(r => ({ts: r.ts, v: r[k]}));
   const mine = id === "out" ? d.outdoor : (d.series[id] || []);
-  const t = [{l: id === "out" ? "Outdoor" : "This sensor", c: "var(--s1)", rows: pts(mine, "temp_f")}];
-  if (id !== "out") t.unshift({l: "Outdoor", c: "var(--ink-3)", dash: "4 3", w: 1.5, rows: pts(d.outdoor, "temp_f")});
+  const t = [{l: nameOf(id), c: "var(--s1)", rows: pts(mine, "temp_f")}], other = ylPairs[id];
+  if (other) {
+    const od = other === "out" ? d.outdoor : (await j(`/api/yolink/history?hours=${hrs}&device=${encodeURIComponent(other)}`).catch(() => ({series: {}}))).series[other] || [];
+    t.unshift({l: nameOf(other), c: "var(--ink-3)", dash: "4 3", w: 1.5, rows: pts(od, "temp_f")});
+    const c = await j(`/api/compare?a=${encodeURIComponent(id)}&b=${encodeURIComponent(other)}&hours=${hrs}`).catch(() => null);
+    if (c && $("ylD-" + id)) {
+      const dv = c.points.map(p => p.delta);
+      mchart($("ylD-" + id), [{l: "Difference", c: "var(--s2)", rows: c.points.map(p => ({ts: p.ts, v: p.delta}))}], {u: "°F", x0, x1: now, span: 4, gap, zeroline: true});
+      $("ylDS-" + id).innerHTML = dv.length ? `<span>avg <b>${sgn(avg(dv))}</b></span><span>range <b>${sgn(Math.min(...dv))}</b> to <b>${sgn(Math.max(...dv))}</b></span>` : "";
+    }
+  }
   mchart($("ylT-" + id), t, {u: "°F", x0, x1: now, span: 6, gap});
   mchart($("ylH-" + id), [{l: "Humidity", c: "var(--s1)", rows: pts(mine, "humidity")}], {u: "%", x0, x1: now, span: 10, dec: 0, gap});
   const tv = mine.map(r => r.temp_f).filter(v => v != null), hv = mine.map(r => r.humidity).filter(v => v != null);
-  const avg = a => a.reduce((x, y) => x + y, 0) / a.length, lab = {24: "24 h", 72: "3 days", 168: "7 days", 720: "30 days"}[hrs];
+  const lab = {24: "24 h", 72: "3 days", 168: "7 days", 720: "30 days"}[hrs];
   $("ylS-" + id).innerHTML = tv.length ? `<span>${lab}: low <b>${fmt(Math.min(...tv), 1)}°</b></span><span>high <b>${fmt(Math.max(...tv), 1)}°</b></span><span>avg <b>${fmt(avg(tv), 1)}°</b></span>` +
     (hv.length ? `<span>humidity ${fmt(Math.min(...hv))}–${fmt(Math.max(...hv))}%</span>` : "") : "<span>No history yet</span>";
 }
 $("ylCards").addEventListener("click", e => {
   const yo = e.target.closest("[data-yoy]"); if (yo) { hSrc = yo.dataset.yoy; return; }
+  if (e.target.closest(".ylcmp, label")) return;
   const c = e.target.closest(".ylc"); if (!c) return; const id = c.dataset.id;
   const rb = e.target.closest(".ylr button");
   if (rb) { ylOpen[id] = +rb.dataset.h; c.querySelectorAll(".ylr button").forEach(b => b.setAttribute("aria-pressed", b === rb)); drawCardHistory(id); return; }
@@ -714,10 +742,13 @@ $("ylCards").addEventListener("click", e => {
   renderYolinkCards();
   if (id in ylOpen) $("ylCards").querySelector(`[data-id="${CSS.escape(id)}"]`).scrollIntoView({block: "nearest", behavior: "smooth"});
 });
+$("ylCards").addEventListener("change", async e => { const sel = e.target.closest(".ylcmp"); if (!sel) return;
+  ylPairs = await fetch("/api/compare/pairs", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({id: sel.dataset.id, other: sel.value || null})}).then(r => r.json());
+  renderYolinkCards(); });
 $("ylCards").addEventListener("keydown", e => { if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("ylc")) { e.preventDefault(); e.target.click(); } });
 function drawYolink() { Object.keys(ylOpen).forEach(drawCardHistory); }
 async function loadYolink() {
-  try { ylSnap = await j("/api/yolink/sensors"); } catch (e) { return; }
+  try { [ylSnap, ylPairs] = await Promise.all([j("/api/yolink/sensors"), j("/api/compare/pairs")]); } catch (e) { return; }
   renderYolinkCards();
   j("/api/events?kind=yolink&limit=100").then(ev => { $("ylLog").innerHTML = ev.length ? ev.map(e => `<div><time>${dtstr(e.ts)}</time><span>${escapeHtml(e.message)}</span></div>`).join("")
     : `<div class="empty">No alarms or offline sensors recorded yet. Alarms use the limits you set in the YoLink app.</div>`; }).catch(() => {});

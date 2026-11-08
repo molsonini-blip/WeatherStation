@@ -1527,6 +1527,58 @@ def build_app(mon: Monitor):
         mon.push("yolink", mon.yolink_snapshot())
         return web.json_response(dict(ok=True, devices=mon.db.kv_get("yl_devices", [])))
 
+    # ---------------- compare two temperature sources (Outdoor vs Attic etc.)
+    def pairs():
+        saved = mon.db.kv_get("compare_pairs", {}) or {}
+        out = {}
+        for dev, st in mon.yl_state.items():
+            out[dev] = saved.get(dev, "out")
+        if "out" in saved:
+            out["out"] = saved["out"]
+        else:
+            attic = next((d for d, st in mon.yl_state.items() if "attic" in st["name"].lower()), None)
+            out["out"] = attic
+        return out
+
+    def series(src, since):
+        if src == "out":
+            return [(r["ts"], c_to_f(r["temp_c"])) for r in
+                    mon.db.q("SELECT ts, temp_c FROM obs WHERE ts>=? AND temp_c IS NOT NULL ORDER BY ts", (since,))]
+        return [(r["ts"], c_to_f(r["temp_c"])) for r in
+                mon.db.q("SELECT ts, temp_c FROM yl_th WHERE device=? AND ts>=? AND temp_c IS NOT NULL ORDER BY ts", (src, since))]
+
+    async def compare_pairs(req):
+        if req.method == "POST":
+            body = await req.json()
+            saved = mon.db.kv_get("compare_pairs", {}) or {}
+            saved[body["id"]] = body.get("other") or None
+            mon.db.kv_set("compare_pairs", saved)
+        return web.json_response(pairs())
+
+    async def compare(req):
+        """Temperature difference a minus b, matched at the sparser source's timestamps (nearest reading within 20 min)."""
+        import bisect
+        a, b = req.query["a"], req.query["b"]
+        hours = min(float(req.query.get("hours", 24)), 24 * 366)
+        since = mon.since(hours * 3600 + 1200)
+        A, B = series(a, since), series(b, since)
+        if not A or not B:
+            return web.json_response(dict(points=[], a=a, b=b))
+        base, other, flip = (A, B, False) if len(A) <= len(B) else (B, A, True)
+        ots = [t for t, _ in other]
+        pts = []
+        for t, v in base:
+            i = bisect.bisect_left(ots, t)
+            best = min((j for j in (i - 1, i) if 0 <= j < len(ots)), key=lambda j: abs(ots[j] - t))
+            if abs(ots[best] - t) > 1200:
+                continue
+            va, vb = (other[best][1], v) if flip else (v, other[best][1])
+            pts.append(dict(ts=t, a=va, b=vb, delta=va - vb))
+        return web.json_response(dict(points=bucket(pts, 900), a=a, b=b))
+
+    r.add_get("/api/compare/pairs", compare_pairs)
+    r.add_post("/api/compare/pairs", compare_pairs)
+    r.add_get("/api/compare", compare)
     r.add_get("/api/yolink/sensors", yl_sensors)
     r.add_get("/api/yolink/history", yl_history)
     r.add_post("/api/yolink/refresh", yl_refresh)
