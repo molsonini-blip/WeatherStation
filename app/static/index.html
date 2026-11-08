@@ -161,6 +161,27 @@ button.danger{box-shadow:inset 0 0 0 1px var(--critical);color:var(--critical)}
 .live-only{display:none}body.live .live-only{display:block}
 @media (max-width:900px){.hero,.tiles,.chart,.half{grid-column:span 12}.tiles{grid-template-columns:repeat(2,1fr)}.fc{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:520px){.big{font-size:52px}.tiles{grid-template-columns:1fr 1fr}.fc{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.pcards{grid-column:span 12;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr))}
+.pc{cursor:pointer;transition:box-shadow .15s}.pc:hover{box-shadow:inset 0 0 0 1px var(--ink-3)}.pc.sel{box-shadow:inset 0 0 0 2px var(--s1)}
+.pc:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.pc h2{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.pc .amt{font-size:28px;font-weight:500;letter-spacing:-.02em;margin:4px 0 2px}.pc .amt small{font-size:13px;color:var(--ink-2);font-weight:400}
+.pc .meta,.ld .meta{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--ink-2);font-size:12.5px;margin-top:4px}
+.pc .meta b,.ld .meta b{color:var(--ink);font-weight:550}
+.tag{font-size:10.5px;font-weight:650;letter-spacing:.04em;text-transform:uppercase;padding:1px 7px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--ring);color:var(--ink-2)}
+.tag.home{color:var(--good)}.tag.com{color:var(--s1)}.tag.vac{color:var(--warning)}
+.ptiles{grid-column:span 12;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,180px),1fr))}
+.ptiles .card .v{font-size:24px;font-weight:500;letter-spacing:-.01em}.ptiles .card .d{font-size:12.5px;color:var(--ink-2);margin-top:2px}
+.tl{width:100%;display:block}.tl text{font-size:11.5px;fill:var(--ink-2)}.tl .nm{fill:var(--ink);font-weight:550}
+.ld{display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr))}
+.ld .big{font-size:26px;font-weight:500}
+.whatif{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:10px;font-size:13px;color:var(--ink-2)}
+.whatif input{width:90px;font:inherit;color:var(--ink);background:var(--surface);border:0;box-shadow:inset 0 0 0 1px var(--ring);border-radius:8px;padding:5px 8px}
+.whatif b{color:var(--ink)}
+#pDetail h3{font-size:11px;font-weight:650;color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em;margin:16px 0 6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+#pgProperties a{color:var(--s1)}
+#pDetail h3 .legend{text-transform:none;letter-spacing:0;font-weight:400}
+table.tight td,table.tight th{padding:4px 8px}
 </style>
 </head>
 <body>
@@ -170,7 +191,7 @@ button.danger{box-shadow:inset 0 0 0 1px var(--critical);color:var(--critical)}
       <h1 id="station">Tempest Monitor</h1>
       <div class="sub" id="fresh">Connecting…</div>
     </div>
-    <nav class="tabs" aria-label="Pages"><a href="#weather" data-pg="weather">Weather</a><a href="#yolink" data-pg="yolink">YoLink</a><a href="#history" data-pg="history">History</a><a href="#bills" data-pg="bills">Bills</a><a href="#sprinklers" data-pg="sprinklers">Sprinklers</a></nav>
+    <nav class="tabs" aria-label="Pages"><a href="#weather" data-pg="weather">Weather</a><a href="#yolink" data-pg="yolink">YoLink</a><a href="#history" data-pg="history">History</a><a href="#bills" data-pg="bills">Bills</a><a href="#sprinklers" data-pg="sprinklers">Sprinklers</a><a href="#properties" data-pg="properties">Properties</a></nav>
     <div class="spacer"></div>
     <span class="badge" id="badge" role="status"><span class="dot"></span><span id="modeLabel">Normal</span></span>
     <div class="seg" id="range" aria-label="History range">
@@ -320,6 +341,42 @@ button.danger{box-shadow:inset 0 0 0 1px var(--critical);color:var(--critical)}
       <section class="card" style="grid-column:span 12"><h2>Sprinklers vs water bill</h2><div style="overflow:auto"><table id="rWater"></table></div>
         <div class="sub" style="margin-top:6px">Sprinkler gallons are estimated from each zone's nozzle rate and area in the Rachio app. Bill gallons come from the Bills tab.</div></section>
       <section class="card" style="grid-column:span 12"><h2>Sprinkler log</h2><div class="log" id="rLog"></div></section>
+    </div>
+  </main>
+
+  <main id="pgProperties" hidden>
+    <div class="grid">
+      <div class="hctl" style="grid-column:span 12">
+        <input type="file" id="pFile" accept="application/pdf" multiple hidden>
+        <select id="pUpFor" aria-label="Property for the upload"><option value="">Property: from the statement</option></select>
+        <button id="pUpload" class="primary">Upload statement PDF</button><button id="pAddBtn">Add property</button>
+        <button id="pScan">Check properties folder</button><button id="pReparse" title="Read stored statements again with the latest reader (hand edits are kept)">Re-read PDFs</button>
+        <span class="sub" id="pInbox"></span>
+      </div>
+      <div class="notice card" id="pNote" style="display:none"></div>
+      <section class="card form" id="pForm" hidden>
+        <input type="hidden" id="pfId">
+        <label>Name<input id="pfName" placeholder="11528 Rustic Rock Dr"></label>
+        <label>Address<input id="pfAddr" placeholder="11528 Rustic Rock Dr, Austin TX"></label>
+        <label>Type<select id="pfKind"><option value="homestead">Homestead</option><option value="rental">Rental (residential)</option><option value="commercial">Commercial</option></select></label>
+        <label>Occupancy<select id="pfOcc"><option value="owner">Owner occupied</option><option value="rented">Rented</option><option value="vacant">Vacant / not rented</option></select></label>
+        <label>Purchase date<input id="pfPDate" type="date"></label>
+        <label>Purchase price ($)<input id="pfPPrice" inputmode="decimal"></label>
+        <label>Estimated value ($)<input id="pfValue" inputmode="decimal"></label>
+        <label>Rent ($/mo)<input id="pfRent" inputmode="decimal"></label>
+        <label style="grid-column:1/-1">Notes<input id="pfNotes"></label>
+        <div class="btnrow"><button class="primary" id="pfSave">Save property</button><button id="pfCancel">Cancel</button><span class="sub" id="pfMsg"></span></div>
+      </section>
+      <div class="ptiles" id="pTiles"></div>
+      <section class="card wide" style="grid-column:span 12"><div class="head"><h2>Mortgage payoff timeline</h2><span class="now" id="pFree"></span></div>
+        <svg class="tl" id="pTimeline"></svg>
+        <div class="sub">From today to each loan's payoff at the current payment (balance, rate and principal + interest from the latest statement). Tick = loan maturity date where the statement shows one.</div></section>
+      <div class="pcards" id="pCards"></div>
+      <section class="card" id="pDetail" style="grid-column:span 12" hidden></section>
+      <section class="card chart"><div class="head"><h2>Property taxes by year</h2><span class="legend" id="pTaxLeg"></span></div><svg class="viz" id="pTax" style="height:230px"></svg></section>
+      <section class="card chart"><div class="head"><h2>Insurance by year</h2><span class="legend" id="pInsLeg"></span></div><svg class="viz" id="pIns" style="height:230px"></svg></section>
+      <section class="card" style="grid-column:span 12"><h2>Taxes &amp; insurance trend</h2><div style="overflow:auto"><table id="pTrend" class="tight"></table></div>
+        <div class="sub" style="margin-top:6px">From escrow statements (each payment out of escrow), the mortgage statements' year-to-date disbursements, or what you enter. "est." = projected by the servicer, not paid yet.</div></section>
     </div>
   </main>
 </div>
@@ -643,6 +700,7 @@ function connect() {
   es.addEventListener("event", () => loadLists());
   es.addEventListener("yolink", e => { if (page === "yolink") loadYolink(); });
   es.addEventListener("bills", () => { if (page === "bills") loadBills(); });
+  es.addEventListener("properties", () => { if (page === "properties") loadProps(); });
   es.addEventListener("rachio", () => { if (page === "sprinklers") loadRachio(); });
   es.addEventListener("hailcam", e => { state.hailcam = JSON.parse(e.data); renderHailcam(state.hailcam); });
   es.addEventListener("shield", e => { renderShield(JSON.parse(e.data)); loadLists(); });
@@ -657,7 +715,7 @@ $("range").onclick = e => { const b = e.target.closest("button"); if (!b) return
   hours = +b.dataset.h; $("range").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); loadHistory(); if (page === "yolink") loadYolink(); };
 $("testBtn").onclick = async () => { const r = await fetch("/api/test-ifttt", {method: "POST"}).then(r => r.json()).catch(() => ({ok: false}));
   $("testMsg").textContent = r.ok ? `Sent “${r.event}”` : (r.error || "Failed"); };
-addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTimeout(() => { drawAll(); if (page === "yolink") drawYolink(); if (page === "history") drawYoy(); if (page === "bills") drawBills(); if (page === "sprinklers") drawRachio(); }, 150); });
+addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTimeout(() => { drawAll(); if (page === "yolink") drawYolink(); if (page === "history") drawYoy(); if (page === "bills") drawBills(); if (page === "sprinklers") drawRachio(); if (page === "properties") drawProps(); }, 150); });
 
 /* refresh cadence follows the mode: every 5 min when calm, every 30 s when live */
 (async function tick() {
@@ -667,14 +725,14 @@ addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTim
 /* ---------- pages: Weather / YoLink ---------- */
 let page = "weather", ylSnap = null;
 function showPage() {
-  page = {"#yolink": "yolink", "#history": "history", "#bills": "bills", "#sprinklers": "sprinklers"}[location.hash] || "weather";
+  page = {"#yolink": "yolink", "#history": "history", "#bills": "bills", "#sprinklers": "sprinklers", "#properties": "properties"}[location.hash] || "weather";
   $("pgWeather").hidden = page !== "weather"; $("pgYolink").hidden = page !== "yolink"; $("pgHistory").hidden = page !== "history";
-  $("pgBills").hidden = page !== "bills"; $("pgSprinklers").hidden = page !== "sprinklers";
+  $("pgBills").hidden = page !== "bills"; $("pgSprinklers").hidden = page !== "sprinklers"; $("pgProperties").hidden = page !== "properties";
   document.querySelectorAll(".tabs a").forEach(a => a.dataset.pg === page ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
   $("badge").style.display = page === "weather" ? "" : "none";
   $("range").style.display = page === "weather" ? "" : "none";
   if (page === "yolink") loadYolink(); else if (page === "history") loadHistoryPage(); else if (page === "bills") loadBills();
-  else if (page === "sprinklers") loadRachio(); else drawAll();
+  else if (page === "sprinklers") loadRachio(); else if (page === "properties") loadProps(); else drawAll();
 }
 addEventListener("hashchange", showPage);
 
@@ -1104,6 +1162,253 @@ document.addEventListener("click", async e => {
 setInterval(() => { if (page === "sprinklers") loadRachio(); }, 60000);
 
 setTheme(savedTheme);
+/* ---------- Properties: mortgages, escrow, taxes, insurance ---------- */
+let pSum = null, pSel = null, pExtra = {};
+const usd = (v, d = 0) => v == null || isNaN(v) ? "--" : (v < 0 ? "-$" : "$") + Math.abs(Number(v)).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const pct = (a, b) => a == null || !b ? "" : (() => { const d = (a - b) / b * 100; return `<span class="${d > 1 ? "up" : d < -1 ? "down" : ""}">${d > 0 ? "▲" : d < 0 ? "▼" : ""} ${fmt(Math.abs(d), 1)}%</span>`; })();
+const monthYear = d => d ? new Date(d.length === 7 ? d + "-15T12:00" : d + "T12:00").toLocaleDateString([], {month: "short", year: "numeric"}) : "--";
+const longDay = d => d ? new Date(d + "T12:00").toLocaleDateString([], {month: "short", day: "numeric", year: "numeric"}) : "--";
+const PKIND = {homestead: ["Homestead", "home"], rental: ["Rental", ""], commercial: ["Commercial", "com"]};
+const pColor = i => `var(--c${(i % 8) + 1})`;
+const shortName = n => n.replace(/\s+(drive|dr|road|rd|boulevard|blvd|street|st|lane|ln|court|ct|avenue|ave|way|cove|cv)\.?$/i, "");
+async function loadProps() {
+  try { pSum = await j("/api/properties"); } catch (e) { return; }
+  const st = pSum.status;
+  $("pInbox").textContent = st.inbox ? `Drop PDFs in ${st.inbox.replace(/\//g, "\\")}\\<property>` + (st.error ? ` · ⚠ ${st.error}` : st.last_scan ? ` · checked ${ago(st.last_scan)}` : "") : "No properties folder set";
+  $("pUpFor").innerHTML = `<option value="">Property: from the statement</option>` + pSum.properties.map(p => `<option value="${p.id}">${escapeHtml(p.name)}</option>`).join("");
+  const rv = pSum.statements.filter(s => s.status === "review").length;
+  $("pNote").style.display = rv ? "" : "none";
+  $("pNote").innerHTML = rv ? `<b>${rv} statement${rv > 1 ? "s" : ""} need review.</b> Some numbers couldn't be read. Open the property and click <b>Edit</b> on the statement.` : "";
+  renderProps(); drawProps();
+}
+/* month-by-month balance at a fixed payment: [{ts, v}], months, interest */
+function amort(bal, rate, pi, extra, start) {
+  const r = (rate || 0) / 1200, pay = (pi || 0) + (extra || 0), rows = [];
+  if (!bal || !pay || pay <= bal * r) return {rows, n: null, interest: null};
+  let b = bal, n = 0, tot = 0; const d = new Date(start + "T12:00");
+  rows.push({ts: d.getTime() / 1000, v: b});
+  while (b > 0.005 && n < 600) { const i = b * r; tot += i; b = Math.max(0, b + i - pay); n++; d.setMonth(d.getMonth() + 1); rows.push({ts: d.getTime() / 1000, v: b}); }
+  return {rows, n, interest: tot};
+}
+const addMonths = (iso, n) => { const d = new Date(iso + "T12:00"); d.setMonth(d.getMonth() + n); return d.toISOString().slice(0, 10); };
+function taxinsFor(pid) {
+  const rows = pSum.taxins.filter(t => t.property_id === pid), by = {};
+  rows.forEach(t => (by[t.year] = by[t.year] || {})[t.kind] = t);
+  return by;
+}
+function renderProps() {
+  const P = pSum.properties, loans = P.flatMap(p => p.current.map(l => ({...l, p})));
+  const bal = loans.reduce((a, l) => a + (l.statement.balance || 0), 0), pay = loans.reduce((a, l) => a + (l.statement.payment || 0), 0);
+  const pi = loans.reduce((a, l) => a + (l.pi || 0), 0), esc = loans.reduce((a, l) => a + (l.statement.escrow_balance || 0), 0);
+  const ti = pSum.taxins, lastY = k => ti.filter(t => !t.estimate && t.kind === k).map(t => t.year).sort().pop(), ly = lastY("tax"), li = lastY("insurance");
+  const sumY = (y, k) => ti.filter(t => t.year === y && t.kind === k).reduce((a, t) => a + t.amount, 0);
+  const last = loans.map(l => l.payoff_date).filter(Boolean).sort().pop();
+  const rent = P.reduce((a, p) => a + (p.rent || 0), 0);
+  $("pTiles").innerHTML = [
+    ["Mortgage balance", usd(bal), `${loans.length} loan${loans.length === 1 ? "" : "s"} · ${P.length} properties`],
+    ["Monthly payments", usd(pay), `${usd(pi)} principal &amp; interest · ${usd(pay - pi)} escrow`],
+    ["Escrow balances", usd(esc), "held by the servicers for taxes and insurance"],
+    [`Property taxes ${ly || ""}`, ly ? usd(sumY(ly, "tax")) : "--", "all properties, where known"],
+    [`Insurance ${li || ""}`, li ? usd(sumY(li, "insurance")) : "--", "all properties, where known"],
+    ["Mortgage-free", last ? monthYear(last) : "--", rent ? `rent ${usd(rent)}/mo vs payments ${usd(pay)}/mo` : "last loan paid off at today's payments"],
+  ].map(([h, v, d]) => `<div class="card"><h2>${h}</h2><div class="v">${v}</div><div class="d">${d}</div></div>`).join("");
+  $("pCards").innerHTML = P.map(p => {
+    const k = PKIND[p.kind] || PKIND.rental, by = taxinsFor(p.id), ys = Object.keys(by).map(Number).sort();
+    const yt = ys.filter(y => by[y].tax && !by[y].tax.estimate).pop(), yi = ys.filter(y => by[y].insurance && !by[y].insurance.estimate).pop();
+    const tax = yt && by[yt].tax, ins = yi && by[yi].insurance, y = yt;
+    const ptax = yt && by[yt - 1] && by[yt - 1].tax, pins = yi && by[yi - 1] && by[yi - 1].insurance;
+    const l = p.current[0], s = l && l.statement;
+    return `<div class="card pc${pSel === p.id ? " sel" : ""}" data-id="${p.id}" tabindex="0" role="button" aria-label="${escapeHtml(p.name)} details">
+      <h2>${escapeHtml(p.name)} <span class="tag ${k[1]}">${k[0]}</span>${p.occupancy === "vacant" ? `<span class="tag vac">Vacant</span>` : ""}</h2>
+      ${s ? `<div class="amt">${usd(p.balance)} <small>owed</small></div>
+        <div class="meta"><span><b>${fmt(s.rate, 3)}%</b> · ${escapeHtml(s.servicer || "")}</span><span>Payment <b>${usd(s.payment, 2)}</b></span></div>
+        <div class="meta"><span>Paid off <b>${l.payoff_date ? monthYear(l.payoff_date) : "--"}</b>${l.months_left ? ` · ${Math.floor(l.months_left / 12)} y ${l.months_left % 12} m` : ""}</span><span>Escrow ${usd(s.escrow_balance)}</span></div>`
+        : `<div class="amt" style="color:var(--ink-2)">${p.loans.length ? "Paid off" : "No mortgage"}</div><div class="meta"><span>${p.loans.length ? "" : "No statements yet"}</span></div>`}
+      <div class="meta"><span>Tax ${y || ""} <b>${tax ? usd(tax.amount) : "--"}</b> ${tax && ptax ? pct(tax.amount, ptax.amount) : ""}</span><span>Insurance ${yi || ""} <b>${ins ? usd(ins.amount) : "--"}</b> ${ins && pins ? pct(ins.amount, pins.amount) : ""}</span></div>
+      ${s && s.status === "review" ? `<span class="pill warn" style="margin-top:8px">Needs review</span>` : ""}</div>`; }).join("");
+  $("pCards").querySelectorAll(".pc").forEach(c => { const go = () => { pSel = pSel === +c.dataset.id ? null : +c.dataset.id; renderProps(); drawProps();
+      if (pSel) $("pDetail").scrollIntoView({block: "nearest", behavior: "smooth"}); };
+    c.onclick = go; c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } }; });
+  renderTrend(); renderDetail();
+}
+function renderTrend() {
+  const P = pSum.properties, ys = [...new Set(pSum.taxins.map(t => t.year))].sort();
+  if (!ys.length) { $("pTrend").innerHTML = `<tr><td class="sub">No tax or insurance amounts yet. They come from escrow statements and mortgage statements, or add them on a property.</td></tr>`; return; }
+  const cell = (pid, y, k) => { const by = taxinsFor(pid), t = by[y] && by[y][k], pv = by[y - 1] && by[y - 1][k];
+    return t ? `${usd(t.amount)}${t.estimate ? ' <span class="sub">est.</span>' : ""} ${pv ? pct(t.amount, pv.amount) : ""}` : `<span class="sub">--</span>`; };
+  $("pTrend").innerHTML = `<tr><th>Property</th><th></th>${ys.map(y => `<th>${y}</th>`).join("")}</tr>` + P.flatMap(p => ["tax", "insurance"].map((k, i) =>
+    `<tr><td>${i ? "" : escapeHtml(p.name)}</td><td class="sub">${k === "tax" ? "Tax" : "Insurance"}</td>${ys.map(y => `<td>${cell(p.id, y, k)}</td>`).join("")}</tr>`)).join("");
+}
+function renderDetail() {
+  const p = pSum.properties.find(x => x.id === pSel), el = $("pDetail");
+  if (!p) { el.hidden = true; return; }
+  el.hidden = false;
+  const by = taxinsFor(p.id), stm = pSum.statements.filter(s => s.property_id === p.id);
+  const loanHtml = p.current.map((l, i) => { const s = l.statement;
+    return `<div class="card ld" style="box-shadow:inset 0 0 0 1px var(--ring)"><div>
+      <div class="sub">${escapeHtml(s.servicer || "Loan")} ${escapeHtml(l.loan)} · statement ${longDay(s.statement_date)}</div>
+      <div class="big">${usd(s.balance, 2)}</div>
+      <div class="meta"><span>Rate <b>${fmt(s.rate, 3)}%</b></span><span>Next due <b>${longDay(s.due_date)}</b></span>${s.maturity ? `<span>Maturity <b>${monthYear(s.maturity)}</b></span>` : ""}</div>
+      <div class="meta"><span>Principal <b>${usd(s.principal, 2)}</b></span><span>Interest <b>${usd(s.interest, 2)}</b></span><span>Escrow <b>${usd(s.escrow, 2)}</b></span><span>Total <b>${usd(s.payment, 2)}</b></span></div>
+      ${s.tax_monthly != null ? `<div class="meta"><span>Escrow for taxes <b>${usd(s.tax_monthly, 2)}</b>/mo</span><span>insurance <b>${usd(s.ins_monthly, 2)}</b>/mo</span></div>` : ""}
+      <div class="meta"><span>Escrow balance <b>${usd(s.escrow_balance, 2)}</b></span>${s.interest_ytd != null ? `<span>Interest paid this year <b>${usd(s.interest_ytd, 2)}</b></span>` : ""}</div></div>
+      <div><div class="sub">Payoff at the current payment</div><div class="big">${l.payoff_date ? monthYear(l.payoff_date) : "--"}</div>
+      <div class="meta"><span><b>${l.months_left ?? "--"}</b> payments left</span><span>Interest still to pay <b>${usd(l.interest_left)}</b></span></div>
+      <div class="whatif">Extra principal <input data-i="${i}" class="pxtra" inputmode="decimal" value="${pExtra[l.loan] || ""}" placeholder="$/month"><span class="pxout" data-i="${i}"></span></div></div></div>`; }).join("");
+  const ys = Object.keys(by).map(Number).sort();
+  el.innerHTML = `<div class="head" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">${escapeHtml(p.name)}</h2>
+      <span class="tag ${(PKIND[p.kind] || PKIND.rental)[1]}">${(PKIND[p.kind] || PKIND.rental)[0]}</span>${p.occupancy === "vacant" ? `<span class="tag vac">Vacant</span>` : ""}
+      <span class="sub">${escapeHtml(p.address || "")}</span><span style="flex:1"></span>
+      <button id="pEdit">Edit property</button><button id="pAddStmt">Add statement by hand</button><button id="pClose" aria-label="Close">✕</button></div>
+    ${p.current.length ? `<h3>Mortgage</h3><div style="display:grid;gap:12px">${loanHtml}</div>
+      <h3>Balance <span class="legend"><span><i style="background:var(--c1)"></i>Statements</span><span><i style="background:var(--ink-3)"></i>Projected</span><span><i style="background:var(--good)"></i>With extra principal</span></span></h3>
+      <svg class="viz" id="pBalChart" style="height:220px"></svg>` : `<p class="sub">No mortgage statements for this property${p.loans.length ? " recently" : ""}.</p>`}
+    <h3>Property tax &amp; insurance <span class="legend"><span><i class="sq" style="background:var(--c2)"></i>Tax</span><span><i class="sq" style="background:var(--c1)"></i>Insurance</span></span></h3>
+    <svg class="viz" id="pTiChart" style="height:200px"></svg>
+    <div style="overflow:auto"><table class="tight"><tr><th>Year</th><th>Property tax</th><th>vs prior year</th><th>Insurance</th><th>vs prior year</th><th>Source</th></tr>
+      ${ys.slice().reverse().map(y => { const t = by[y].tax, n = by[y].insurance, pt = by[y - 1] && by[y - 1].tax, pn = by[y - 1] && by[y - 1].insurance;
+        return `<tr><td>${y}</td><td>${t ? usd(t.amount, 2) + (t.estimate ? ' <span class="sub">est.</span>' : "") : "--"}</td><td>${t && pt ? pct(t.amount, pt.amount) : ""}</td>
+          <td>${n ? usd(n.amount, 2) + (n.estimate ? ' <span class="sub">est.</span>' : "") : "--"}</td><td>${n && pn ? pct(n.amount, pn.amount) : ""}</td>
+          <td class="sub">${[...new Set([t, n].filter(Boolean).map(x => ({escrow: "escrow statement", statement: "mortgage statement", manual: "entered"})[x.source]))].join(", ")}</td></tr>`; }).join("") || `<tr><td colspan="6" class="sub">Nothing yet.</td></tr>`}</table></div>
+    <div class="whatif">Add or correct a year:
+      <select id="pcKind"><option value="tax">Property tax</option><option value="insurance">Insurance</option><option value="hoa">HOA</option></select>
+      <input id="pcYear" inputmode="numeric" placeholder="Year" value="${new Date().getFullYear() - 1}"><input id="pcAmt" inputmode="decimal" placeholder="Amount $">
+      <input id="pcProv" placeholder="Insurer / county" style="width:140px"><button id="pcSave">Save</button><span class="sub" id="pcMsg"></span></div>
+    <div id="pUtil"></div>
+    <h3>Statements</h3><div style="overflow:auto"><table class="tight"><tr><th>Date</th><th>Servicer</th><th>Balance</th><th>Rate</th><th>Payment</th><th>Principal</th><th>Interest</th><th>Escrow</th><th>Escrow bal.</th><th></th></tr>
+      ${stm.map(s => `<tr><td>${longDay(s.statement_date)}</td><td>${escapeHtml(s.servicer || "")} ${escapeHtml(s.loan || "")}</td><td>${usd(s.balance, 2)}</td><td>${fmt(s.rate, 3)}%</td>
+        <td>${usd(s.payment, 2)}</td><td>${usd(s.principal, 2)}</td><td>${usd(s.interest, 2)}</td><td>${usd(s.escrow, 2)}</td><td>${usd(s.escrow_balance, 2)}</td>
+        <td style="white-space:nowrap">${s.status === "review" ? '<span class="pill warn">Review</span> ' : ""}${s.file ? `<a href="/api/properties/statement/${s.id}/pdf" target="_blank" rel="noopener">PDF</a> ` : ""}<a href="#properties" data-st="${s.id}" class="pst">Edit</a></td></tr>`).join("") || `<tr><td colspan="10" class="sub">None yet.</td></tr>`}</table></div>
+    <section class="form" id="psForm" hidden style="margin-top:10px">
+      <input type="hidden" id="psId">
+      ${[["Statement date", "statement_date", "date"], ["Next due", "due_date", "date"], ["Servicer", "servicer"], ["Loan (last 4)", "loan"], ["Balance ($)", "balance"], ["Rate (%)", "rate"],
+         ["Payment ($)", "payment"], ["Principal ($)", "principal"], ["Interest ($)", "interest"], ["Escrow ($)", "escrow"], ["Escrow balance ($)", "escrow_balance"], ["Maturity", "maturity", "date"],
+         ["Interest paid YTD ($)", "interest_ytd"], ["Taxes paid YTD ($)", "taxes_ytd"], ["Insurance paid YTD ($)", "insurance_ytd"]].map(([l, k, t]) =>
+         `<label>${l}<input data-k="${k}" ${t ? `type="${t}"` : 'inputmode="decimal"'}></label>`).join("")}
+      <div class="btnrow"><button class="primary" id="psSave">Save statement</button><button id="psDel">Delete</button><button id="psCancel">Cancel</button><span class="sub" id="psMsg"></span></div>
+    </section>`;
+  $("pClose").onclick = () => { pSel = null; renderProps(); };
+  $("pEdit").onclick = () => propForm(p);
+  $("pAddStmt").onclick = () => stmtForm({property_id: p.id, servicer: p.current[0] && p.current[0].servicer, loan: p.current[0] && p.current[0].loan});
+  el.querySelectorAll(".pst").forEach(a => a.onclick = e => { e.preventDefault(); stmtForm(pSum.statements.find(s => s.id === +a.dataset.st)); });
+  el.querySelectorAll(".pxtra").forEach(inp => inp.oninput = () => { pExtra[p.current[+inp.dataset.i].loan] = parseFloat(inp.value) || 0; whatIf(p); drawDetail(); });
+  $("pcSave").onclick = async () => {
+    const r = await fetch("/api/properties/cost", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({property_id: p.id,
+      kind: $("pcKind").value, year: +$("pcYear").value, amount: $("pcAmt").value, provider: $("pcProv").value})}).then(r => r.json()).catch(() => ({ok: false}));
+    $("pcMsg").textContent = r.ok ? "Saved" : (r.error || "Couldn't save"); if (r.ok) loadProps(); };
+  whatIf(p); loadPropBills(p);
+}
+function whatIf(p) {
+  p.current.forEach((l, i) => { const out = document.querySelector(`.pxout[data-i="${i}"]`), x = pExtra[l.loan] || 0; if (!out) return;
+    if (!x) { out.textContent = "see how much sooner it's paid off"; return; }
+    const a = amort(l.statement.balance, l.statement.rate, l.pi, x, l.statement.due_date || new Date().toISOString().slice(0, 10));
+    if (!a.n) { out.textContent = ""; return; }
+    const pd = addMonths(l.statement.due_date, a.n - 1), saved = (l.months_left || 0) - a.n;
+    out.innerHTML = `paid off <b>${monthYear(pd)}</b> · ${Math.floor(saved / 12)} y ${saved % 12} m sooner · saves <b>${usd((l.interest_left || 0) - a.interest)}</b> interest`; });
+}
+async function loadPropBills(p) {
+  let d; try { d = await j(`/api/properties/${p.id}/bills`); } catch (e) { return; }
+  if (pSel !== p.id || !d.bills.length) { $("pUtil").innerHTML = ""; return; }
+  const us = [...new Set(d.bills.map(b => b.utility || "other"))];
+  $("pUtil").innerHTML = `<h3>Utility bills <span class="legend">${us.map(u => `<span><i class="sq" style="background:${(UTIL[u] || ["", "var(--ink-3)"])[1]}"></i>${(UTIL[u] || [u])[0]}</span>`).join("")}</span></h3>
+    <svg class="viz" id="pUtilChart" style="height:200px"></svg>
+    <details><summary class="sub" style="cursor:pointer;margin-top:6px">${d.bills.length} bills</summary><div style="overflow:auto"><table class="tight"><tr><th>Period</th><th>Provider</th><th>Type</th><th>Amount</th><th>Usage</th><th></th></tr>
+    ${d.bills.map(b => `<tr><td>${b.period_start ? shortDay(b.period_start) + " – " : ""}${b.period_end ? longDay(b.period_end) : "--"}</td><td>${escapeHtml(b.provider || "")}</td><td>${(UTIL[b.utility] || [b.utility || ""])[0]}</td>
+      <td>${usd(b.amount, 2)}</td><td>${b.usage != null ? fmt(b.usage) + " " + escapeHtml(b.unit || "") : ""}</td><td>${b.file ? `<a href="/api/bills/${b.id}/pdf" target="_blank" rel="noopener">PDF</a>` : ""}${b.status === "review" ? ' <span class="pill warn">Review</span>' : ""}</td></tr>`).join("")}</table></div></details>`;
+  bars($("pUtilChart"), d.monthly.slice(-24).map(m => ({label: monthLabel(m.month), title: monthYear(m.month), v: m.v})),
+    us.map(u => ({k: u, l: (UTIL[u] || [u])[0], c: (UTIL[u] || ["", "var(--ink-3)"])[1]})), {money: true, dec: 2});
+}
+function drawDetail() {
+  const p = pSum && pSum.properties.find(x => x.id === pSel); if (!p) return;
+  if ($("pBalChart") && p.current.length) {
+    const ser = [{l: "Statements", c: "var(--c1)", rows: p.history.filter(h => h.balance != null).map(h => ({ts: new Date(h.d + "T12:00").getTime() / 1000, v: h.balance}))}];
+    let x1 = Date.now() / 1000;
+    p.current.forEach(l => { const s = l.statement, st = s.due_date || s.statement_date;
+      const a = amort(s.balance, s.rate, l.pi, 0, st); if (a.rows.length) { ser.push({l: "Projected", c: "var(--ink-3)", dash: "4 4", rows: a.rows}); x1 = Math.max(x1, a.rows[a.rows.length - 1].ts); }
+      const x = pExtra[l.loan]; if (x) { const b = amort(s.balance, s.rate, l.pi, x, st); if (b.rows.length) ser.push({l: "With extra principal", c: "var(--good)", rows: b.rows}); } });
+    const x0 = Math.min(...ser.flatMap(s => s.rows.map(r => r.ts)));
+    mchart($("pBalChart"), ser, {u: "", dec: 0, x0, x1, gap: 400 * 86400, points: false, tlabel: t => new Date(t * 1000).toLocaleDateString([], {month: "short", year: "numeric"})});
+  }
+  const by = taxinsFor(p.id), ys = Object.keys(by).map(Number).sort();
+  bars($("pTiChart"), ys.map(y => ({label: String(y), title: String(y) + ((by[y].tax || {}).estimate || (by[y].insurance || {}).estimate ? " (part estimated)" : ""),
+    v: {tax: by[y].tax ? by[y].tax.amount : 0, insurance: by[y].insurance ? by[y].insurance.amount : 0}})),
+    [{k: "tax", l: "Property tax", c: "var(--c2)"}, {k: "insurance", l: "Insurance", c: "var(--c1)"}], {money: true, dec: 2, empty: "No tax or insurance amounts yet"});
+}
+function drawProps() {
+  if (!pSum) return;
+  const P = pSum.properties, loans = P.flatMap((p, i) => p.current.filter(l => l.payoff_date).map(l => ({...l, p, i})));
+  // payoff timeline
+  const svg = $("pTimeline"), W = svg.clientWidth || 800, rowH = 26, L = Math.min(190, W * 0.38), R = 12, T = 22, H = T + rowH * Math.max(1, loans.length) + 6;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.style.height = H + "px";
+  if (!loans.length) svg.innerHTML = `<text x="${W / 2}" y="${H / 2 + 4}" text-anchor="middle">Payoff dates appear once mortgage statements are added</text>`;
+  else {
+    const now = new Date(), y0 = now.getFullYear(), yEnd = Math.max(...loans.map(l => +(l.maturity || l.payoff_date).slice(0, 4)), +loans[0].payoff_date.slice(0, 4)) + 1;
+    const X = t => L + (t - y0) / (yEnd - y0) * (W - L - R), yr = d => { const x = new Date(d + "T12:00"); return x.getFullYear() + x.getMonth() / 12; };
+    let g = ""; const step = (yEnd - y0) > 20 ? 5 : 2;
+    for (let y = y0; y <= yEnd; y++) if ((y - y0) % step === 0) g += `<line x1="${X(y)}" x2="${X(y)}" y1="${T - 4}" y2="${H}" stroke="var(--grid)"/><text x="${X(y)}" y="12" text-anchor="middle">${y}</text>`;
+    const nowX = X(y0 + now.getMonth() / 12);
+    loans.sort((a, b) => a.payoff_date.localeCompare(b.payoff_date)).forEach((l, k) => { const y = T + k * rowH, s = l.statement;
+      g += `<text class="nm" x="0" y="${y + 16}">${escapeHtml(l.p.name.length > 24 ? l.p.name.slice(0, 23) + "…" : l.p.name)}</text>`;
+      g += `<rect x="${nowX}" y="${y + 5}" width="${Math.max(2, X(yr(l.payoff_date)) - nowX)}" height="14" rx="4" fill="${pColor(l.i)}" opacity=".85"><title>${escapeHtml(l.p.name)}: ${usd(s.balance)} at ${fmt(s.rate, 3)}% · paid off ${monthYear(l.payoff_date)}</title></rect>`;
+      const tx = X(yr(l.payoff_date)) + 6, inside = tx > W - 70;
+      g += `<text x="${inside ? X(yr(l.payoff_date)) - 6 : tx}" y="${y + 16}" text-anchor="${inside ? "end" : "start"}" ${inside ? 'style="fill:var(--surface)"' : ""}>${monthYear(l.payoff_date)}</text>`;
+      if (s.maturity) g += `<line x1="${X(yr(s.maturity))}" x2="${X(yr(s.maturity))}" y1="${y + 2}" y2="${y + 22}" stroke="var(--ink-2)" stroke-width="2"><title>Maturity ${monthYear(s.maturity)}</title></line>`; });
+    svg.innerHTML = g;
+    $("pFree").textContent = `Mortgage-free ${monthYear(loans.map(l => l.payoff_date).sort().pop())}`;
+  }
+  // taxes / insurance by year, stacked by property
+  const ys = [...new Set(pSum.taxins.map(t => t.year))].sort(), stacks = P.map((p, i) => ({k: String(p.id), l: shortName(p.name), c: pColor(i)}));
+  for (const [kind, svgId, legId] of [["tax", "pTax", "pTaxLeg"], ["insurance", "pIns", "pInsLeg"]]) {
+    const used = stacks.filter(s => pSum.taxins.some(t => t.kind === kind && String(t.property_id) === s.k));
+    $(legId).innerHTML = used.map(s => `<span><i class="sq" style="background:${s.c}"></i>${escapeHtml(s.l)}</span>`).join("");
+    bars($(svgId), ys.map(y => { const v = {}; pSum.taxins.filter(t => t.year === y && t.kind === kind).forEach(t => v[String(t.property_id)] = t.amount);
+      return {label: String(y), title: String(y), v}; }), used, {money: true, dec: 0, empty: "No amounts yet"});
+  }
+  drawDetail();
+}
+function propForm(p) {
+  $("pForm").hidden = false; $("pfMsg").textContent = "";
+  $("pfId").value = p ? p.id : ""; $("pfName").value = p ? p.name : ""; $("pfAddr").value = (p && p.address) || ""; $("pfKind").value = (p && p.kind) || "rental";
+  $("pfOcc").value = (p && p.occupancy) || "rented"; $("pfPDate").value = (p && p.purchase_date) || ""; $("pfPPrice").value = p && p.purchase_price != null ? p.purchase_price : "";
+  $("pfValue").value = p && p.value != null ? p.value : ""; $("pfRent").value = p && p.rent != null ? p.rent : ""; $("pfNotes").value = (p && p.notes) || "";
+  $("pForm").scrollIntoView({block: "nearest", behavior: "smooth"});
+}
+function stmtForm(s) {
+  $("psForm").hidden = false; $("psMsg").textContent = ""; $("psId").value = s.id || ""; $("psForm").dataset.pid = s.property_id;
+  $("psForm").querySelectorAll("input[data-k]").forEach(i => i.value = s[i.dataset.k] ?? "");
+  $("psDel").hidden = !s.id;
+  $("psCancel").onclick = () => $("psForm").hidden = true;
+  $("psSave").onclick = async () => { const body = {id: $("psId").value || null, property_id: +$("psForm").dataset.pid};
+    $("psForm").querySelectorAll("input[data-k]").forEach(i => body[i.dataset.k] = i.value || null);
+    const r = await fetch("/api/properties/statement", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}).then(r => r.json()).catch(() => ({ok: false}));
+    $("psMsg").textContent = r.ok ? "Saved" : "Couldn't save"; if (r.ok) loadProps(); };
+  $("psDel").onclick = async () => { if ($("psDel").dataset.armed !== "1") { $("psDel").dataset.armed = "1"; $("psDel").textContent = "Click again to delete"; return; }
+    await fetch(`/api/properties/statement/${s.id}`, {method: "DELETE"}); loadProps(); };
+  $("psForm").scrollIntoView({block: "nearest", behavior: "smooth"});
+}
+$("pAddBtn").onclick = () => propForm(null);
+$("pfCancel").onclick = () => { $("pForm").hidden = true; };
+$("pfSave").onclick = async () => {
+  const body = {id: $("pfId").value || null, name: $("pfName").value.trim(), address: $("pfAddr").value, kind: $("pfKind").value, occupancy: $("pfOcc").value,
+    purchase_date: $("pfPDate").value || null, purchase_price: $("pfPPrice").value, value: $("pfValue").value, rent: $("pfRent").value, notes: $("pfNotes").value};
+  if (!body.name) { $("pfMsg").textContent = "Give it a name"; return; }
+  const r = await fetch("/api/properties/save", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}).then(r => r.json()).catch(() => ({ok: false}));
+  $("pfMsg").textContent = r.ok ? "Saved" : "Couldn't save"; if (r.ok) { $("pForm").hidden = true; loadProps(); } };
+$("pUpload").onclick = () => $("pFile").click();
+$("pFile").onchange = async () => {
+  const fd = new FormData(); fd.append("property_id", $("pUpFor").value); [...$("pFile").files].forEach(f => fd.append("file", f, f.name));
+  $("pUpload").textContent = "Reading…";
+  const r = await fetch("/api/properties/upload", {method: "POST", body: fd}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
+  $("pUpload").textContent = r.ok ? `Added ${r.ids.filter(Boolean).length}` : "Not recognised"; if (!r.ok) { $("pNote").style.display = ""; $("pNote").textContent = "⚠ " + r.error; }
+  setTimeout(() => $("pUpload").textContent = "Upload statement PDF", 3000); $("pFile").value = ""; loadProps(); };
+$("pScan").onclick = async () => { $("pScan").textContent = "Checking…";
+  const r = await fetch("/api/properties/scan", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
+  $("pScan").textContent = r.ok ? (r.added ? `Read ${r.added}` : "Nothing new") : "Couldn't reach folder"; if (!r.ok) $("pInbox").textContent = "⚠ " + r.error;
+  setTimeout(() => $("pScan").textContent = "Check properties folder", 3000); loadProps(); };
+$("pReparse").onclick = async () => { $("pReparse").textContent = "Reading…";
+  const r = await fetch("/api/properties/reparse", {method: "POST"}).then(r => r.json()).catch(() => ({ok: false}));
+  $("pReparse").textContent = r.ok ? `Updated ${r.updated}` : "Failed"; setTimeout(() => $("pReparse").textContent = "Re-read PDFs", 3000); loadProps(); };
+
 showPage();
 connect();
 </script>

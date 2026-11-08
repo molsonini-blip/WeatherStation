@@ -43,9 +43,11 @@ PROVIDERS = [  # (pattern, provider name, utility)
     (r"\brhythm\b", "Rhythm", "electric"),
     (r"\btxu\b", "TXU Energy", "electric"),
     (r"reliant", "Reliant", "electric"),
-    (r"oncor|pedernales|\bpec\b", None, "electric"),
+    (r"pedernales electric|\bpec\b", "Pedernales Electric", "electric"),
+    (r"oncor", None, "electric"),
+    (r"city of austin|austin water|austinwater", "City of Austin", "water"),
     (r"at&t|att\.com|at ?& ?t fiber", "AT&T Fiber", "internet"),
-    (r"spectrum|xfinity|comcast|google fiber|astound|grande", None, "internet"),
+    (r"spectrum", "Spectrum", "internet"), (r"xfinity|comcast|google fiber|astound|grande", None, "internet"),
     (r"atmos", "Atmos Energy", "gas"),
     (r"texas gas service|centerpoint", None, "gas"),
     (r"city of round rock|round rock utility", "City of Round Rock", "water"),
@@ -106,7 +108,7 @@ def valid_period(start, end, today=None):
     return 5 <= (e - s).days <= 70 and e <= today + timedelta(days=45) and e.year >= 2000
 
 
-PARSER_VERSION = 5  # bump when extract() changes: stored PDFs are re-read on the next start
+PARSER_VERSION = 6  # bump when extract() changes: stored PDFs are re-read on the next start
 
 
 def money(s):
@@ -164,6 +166,11 @@ def extract(text: str) -> dict:
         if m:
             out["amount"] = money(m.group(1))
             break
+    # budget billing (PEC, City of Austin): the amount due is the budget; the month's real cost is "current charges"
+    if re.search(r"budget (?:amount due|plan balance|payment program|billing is (?:currently )?active)|monthly budget amount", low):
+        m = re.search(r"current (?:monthly )?charges[^$\d\n]{0,20}\$\s*([\d,]+\.\d{2})", low)
+        if m:
+            out["amount"] = money(m.group(1))
     if out["amount"] is None:
         vals = [money(x) for x in re.findall(r"\$\s*([\d,]+\.\d{2})", t)]
         if vals:
@@ -209,10 +216,10 @@ def extract(text: str) -> dict:
 
     # budget / average monthly billing: the fixed monthly amount and the running balance
     # (balance > 0 = actual charges ran ahead of the payments, you owe it; < 0 = credit)
-    m = re.search(r"(?:monthly budget (?:bill )?amount|average monthly billing\*? amount:?)\s*\$?\s*([\d,]+\.\d{2})", low)
+    m = re.search(r"(?:monthly budget (?:bill )?amount(?: due)?|budget amount due|average monthly billing\*? amount:?)\s*\$?\s*([\d,]+\.\d{2})", low)
     if m:
         out["budget_amount"] = money(m.group(1))
-    m = re.search(r"total budget balance\s*\$?\s*(-?[\d,]+\.\d{2})", low)
+    m = re.search(r"(?:total budget|budget plan) balance\s*\$?\s*(-?[\d,]+\.\d{2})", low)
     if m:
         out["budget_balance"] = money(m.group(1))
     m = re.search(r"cumulative balance total:?\s*\$?\s*(-?[\d,]+\.\d{2})\s*(cr)?", low)
@@ -226,6 +233,7 @@ def extract(text: str) -> dict:
     m = (re.search(rf"service period:?\s*({DATE_RE}){SEP}({DATE_RE})", low)
          or re.search(rf"{D}\s+\d{{3,7}}\s+{D}\s+\d{{3,7}}\s+\d", low)          # TXU: date read date read usage
          or re.search(rf"{D}\s+{D}\s+\d{{3,7}}\s+\d{{3,7}}", low)                # Atmos: meter, from, to, reads
+         or re.search(rf"\d{{4,}}\s+{D}\s+{D}\s+\d{{1,2}}\s+\d", low)            # PEC: meter, from, to, days
          or re.search(rf"(?:service|billing|statement)? ?(?:period|dates?|from)[^\n]{{0,25}}?({DATE_RE}){SEP}({DATE_RE})", low))
     cands = [m] if m else []
     cands += list(re.finditer(rf"({DATE_RE}){SEP}({DATE_RE})", low))
@@ -241,7 +249,7 @@ def extract(text: str) -> dict:
          or re.search(rf"(?:due date|payment due|pay by|due by|due on|autopay is scheduled for)[\s\S]{{0,60}}?({DATE_RE})", low))
     if m:
         out["due_date"] = parse_date(m.group(1))
-    m = re.search(rf"(?:bill|billing|statement|invoice|issue) date:?\s*({DATE_RE})", low)
+    m = re.search(rf"(?:bill|billing|statement|invoice|issue|bill print) date:?\s*({DATE_RE})", low)
     if m:
         out["bill_date"] = parse_date(m.group(1))
     # period written without a year (AT&T: "Monthly charges Oct 14 - Nov 13"): take the year from the bill date
@@ -335,7 +343,7 @@ class Bills:
         self.mon, self.db, self.cfg, self.resolve_host = mon, mon.db, cfg, resolve_host
         self.db.c.executescript(SCHEMA)
         cols = {r["name"] for r in self.db.q("PRAGMA table_info(bills)")}
-        for col in ("budget_amount REAL", "budget_balance REAL", "edited INTEGER"):
+        for col in ("budget_amount REAL", "budget_balance REAL", "edited INTEGER", "property_id INTEGER"):
             if col.split()[0] not in cols:
                 self.db.x(f"ALTER TABLE bills ADD COLUMN {col}")
         self.dir = Path(cfg.db_path).parent / "bills"
@@ -344,7 +352,8 @@ class Bills:
         self.status = dict(inbox=self.smb_path, last_scan=None, error=None, smt=None)
 
     # ------------------------------------------------------------------ ingest
-    async def ingest_pdf(self, name: str, data: bytes, source: str):
+    async def ingest_pdf(self, name: str, data: bytes, source: str, property_id=None):
+        """property_id: a rental's bill (from the Properties folder); those stay off the Bills tab."""
         if re.search(NOT_A_BILL, name.lower()):
             log.info("skipping %s (not a bill)", name)
             return None
@@ -371,24 +380,25 @@ class Bills:
         clean_fields(fields)
         ok = all(fields.get(k) is not None for k in ("utility", "amount", "period_end"))
         if fields.get("period_end") and fields.get("amount") is not None:
-            dup = self.db.q("SELECT id FROM bills WHERE utility=? AND period_end=? AND ABS(amount-?)<0.01",
-                            (fields["utility"], fields["period_end"], fields["amount"]))
+            dup = self.db.q("SELECT id FROM bills WHERE utility=? AND period_end=? AND ABS(amount-?)<0.01 "
+                            "AND COALESCE(property_id,0)=?", (fields["utility"], fields["period_end"], fields["amount"],
+                                                             property_id or 0))
             if dup:
                 path.unlink(missing_ok=True)
                 log.info("%s is already in the list (bill %s)", name, dup[0]["id"])
                 return dup[0]["id"]
         status = "ok" if ok else "review"
         bid = self.db.x("""INSERT INTO bills (utility, provider, period_start, period_end, bill_date, due_date, amount, usage,
-                           unit, status, file, source, notes, created, budget_amount, budget_balance)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                           unit, status, file, source, notes, created, budget_amount, budget_balance, property_id)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (fields["utility"], fields["provider"], fields["period_start"], fields["period_end"],
                          fields["bill_date"], fields["due_date"], fields["amount"], fields["usage"], fields["unit"],
                          status, path.name, source, None if text else "no text found in PDF (scanned image?)", int(time.time()),
-                         fields.get("budget_amount"), fields.get("budget_balance")))
+                         fields.get("budget_amount"), fields.get("budget_balance"), property_id))
         label = f"{(fields['provider'] or fields['utility'] or 'Bill')}"
         amt = f"${fields['amount']:.2f}" if fields["amount"] is not None else "amount not found"
         self.mon.log_event("bills", f"Bill added from {source}: {label} {amt}" + (" · needs review" if status == "review" else ""))
-        self.mon.push("bills", dict(id=bid))
+        self.mon.push("properties" if property_id else "bills", dict(id=bid))
         return bid
 
     async def reparse(self, force=False):
@@ -423,7 +433,8 @@ class Bills:
                 changed += 1
         # the same bill read twice (now that dates are known): keep the first
         self.db.x("""DELETE FROM bills WHERE COALESCE(edited,0)=0 AND period_end IS NOT NULL AND id NOT IN
-                     (SELECT MIN(id) FROM bills WHERE period_end IS NOT NULL GROUP BY utility, period_end, ROUND(amount,2))""")
+                     (SELECT MIN(id) FROM bills WHERE period_end IS NOT NULL
+                      GROUP BY COALESCE(property_id,0), utility, period_end, ROUND(amount,2))""")
         self.db.kv_set("bills_parser", PARSER_VERSION)
         if changed:
             self.mon.log_event("bills", f"Re-read {changed} bill PDFs with the updated reader")
@@ -542,7 +553,7 @@ class Bills:
 
     # ------------------------------------------------------------------ queries
     def summary(self):
-        bills = self.db.q("SELECT * FROM bills ORDER BY COALESCE(period_end, bill_date, date(created,'unixepoch')) DESC, id DESC")
+        bills = self.db.q("SELECT * FROM bills WHERE property_id IS NULL ORDER BY COALESCE(period_end, bill_date, date(created,'unixepoch')) DESC, id DESC")
         latest = {}
         for u in UTILITIES:
             rows = [b for b in bills if b["utility"] == u and b["amount"] is not None]
@@ -578,7 +589,7 @@ class Bills:
         # Sep 2 - Sep 29 bill and a Sep 30 - Nov 1 bill land in September and October, not both in September
         agg = {}
         for b in self.db.q("SELECT utility, amount, usage, period_start, period_end, bill_date, due_date FROM bills "
-                           "WHERE amount IS NOT NULL"):
+                           "WHERE amount IS NOT NULL AND property_id IS NULL"):
             m = bill_month(b)
             if not m:
                 continue

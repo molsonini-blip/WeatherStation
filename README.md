@@ -173,6 +173,23 @@ provider in its own sub-folder (e.g. `Google Fi`, `ATT`); a folder named for the
 - Cards show the latest bill per utility with the change from the last bill and the same month last year (and ¢/kWh);
   the monthly cost chart stacks the four bills and shows cooling/heating degree-days from the Tempest on hover.
 
+## Properties tab (`#properties`)
+The homestead, residential rentals and commercial properties: mortgages, escrow, property taxes, insurance and payoff dates.
+
+- **Statements in:** drop PDFs in `\\readyshare\Data\WeatherStation\Properties\<property>` (the Windows sync task copies
+  `Property\Dashboard\<property>` from Google Drive, plus the statement folders listed in `sync_bills.bat`), or
+  **Upload statement PDF**. Each PDF is sorted automatically: a **mortgage statement** (balance, rate, principal / interest /
+  escrow, escrow balance, year-to-date interest and escrow disbursements), an **escrow analysis** (each tax and insurance
+  payment out of escrow, actual or projected) or a **utility bill** (a rental's bills; kept off the Bills tab). Anything
+  else is ignored. The property is taken from the statement's property address, not the mailing address. Tested with
+  Rocket Mortgage, Regions, Truist, UWM and Mr. Cooper layouts.
+- **Payoff:** months left = standard amortization of the latest balance at the statement's rate and principal + interest
+  payment. The timeline shows every loan from today to payoff (tick = maturity date when the statement shows one). On a
+  property, **Extra principal** shows the new payoff date and interest saved.
+- **Taxes & insurance trend:** per property per year, from escrow statements, the statements' year-to-date
+  disbursements, or what you enter (entries win). Year-over-year change is shown; "est." = servicer projection.
+- `PROPERTIES` in `.env` lists properties to show before any statement arrives (commercial, paid off, vacant).
+
 ## Sprinklers tab (`#sprinklers`, Rachio)
 
 Set `RACHIO_API_KEY` (Rachio app → Account settings → Get API key).

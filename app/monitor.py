@@ -1787,6 +1787,8 @@ def build_app(mon: Monitor):
     import rachio as rachio_mod
     bills_mod.register(r, web, mon, mon.bills)
     rachio_mod.register(r, web, mon, mon.rachio)
+    import properties as properties_mod
+    properties_mod.register(r, web, mon, mon.properties)
     r.add_get("/api/hailcam/image", hailcam_image)
     r.add_post("/api/hailcam/test", hailcam_test)
     r.add_static("/static", STATIC)
@@ -1828,6 +1830,8 @@ async def main():
     import rachio as rachio_mod
     mon.bills = bills_mod.Bills(mon, CFG, resolve_share_host)
     mon.rachio = rachio_mod.Rachio(mon, CFG)
+    import properties as properties_mod
+    mon.properties = properties_mod.Properties(mon, CFG, resolve_share_host)
     runner = web.AppRunner(build_app(mon))
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", CFG.http_port).start()
@@ -1837,7 +1841,8 @@ async def main():
     mon.hailcam_setup()
     await asyncio.gather(mon.udp_loop(), mon.ws_loop(), mon.scheduler(), mon.daily_loop(), mon.hailcam_loop(),
                          mon.yolink_th_loop(), mon.history_backfill_loop(),
-                         mon.bills.inbox_loop(), mon.bills.smt_loop(), mon.rachio.loop())
+                         mon.bills.inbox_loop(), mon.bills.smt_loop(), mon.rachio.loop(),
+                         mon.properties.inbox_loop())
 
 
 if __name__ == "__main__":
