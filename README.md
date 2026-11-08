@@ -114,7 +114,7 @@ Or set `HAIL_SHIELD_ON_URL` / `HAIL_SHIELD_OFF_URL` to call Home Assistant or th
 These endpoints are useful for Home Assistant, Grafana, or your LLM stack:
 
 `/api/state` · `/api/history?hours=24` · `/api/rapid?minutes=30` · `/api/strikes?hours=24` ·
-`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
+`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/wind_rose?hours=24` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
 `POST /api/test-ifttt`
 
 ## Notes

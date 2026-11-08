@@ -10,7 +10,7 @@
   --bg:#f4f3ef;--surface:#fcfcfb;--surface-2:#f0efea;--ink:#0b0b0b;--ink-2:#52514e;--ink-3:#7a7974;
   --grid:#e1e0d9;--axis:#c3c2b7;--ring:rgba(11,11,11,.10);
   --s1:#2a78d6;--s2:#eb6834;--s1-soft:rgba(42,120,214,.14);
-  --sun:#f2a900;--moon:#b9b5a8;--cloud:#cdd2da;--cloud-dk:#8e95a0;--rain:#2a78d6;--snow:#9fc3ee;--bolt:#f2a900;--cold:#4f9be8;--warm:#eb6834;
+  --sun:#f2a900;--moon:#b9b5a8;--cloud:#cdd2da;--cloud-dk:#8e95a0;--rain:#2a78d6;--snow:#9fc3ee;--bolt:#f2a900;--cold:#4f9be8;--warm:#eb6834;--b1:#b7d3f6;--b2:#6da7ec;--b3:#2a78d6;--b4:#1c5cab;--b5:#0d366b;
   --good:#0ca30c;--warning:#fab219;--serious:#ec835a;--critical:#d03b3b;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
@@ -18,14 +18,14 @@
   --bg:#111110;--surface:#1a1a19;--surface-2:#222220;--ink:#f0efec;--ink-2:#c3c2b7;--ink-3:#8f8e88;
   --grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);
   --s1:#3987e5;--s2:#d95926;--s1-soft:rgba(57,135,229,.18);
-  --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;
+  --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;--b1:#cde2fb;--b2:#86b6ef;--b3:#3987e5;--b4:#256abf;--b5:#184f95;
 }}
 :root[data-theme="dark"]{
   color-scheme:dark;
   --bg:#111110;--surface:#1a1a19;--surface-2:#222220;--ink:#f0efec;--ink-2:#c3c2b7;--ink-3:#8f8e88;
   --grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);
   --s1:#3987e5;--s2:#d95926;--s1-soft:rgba(57,135,229,.18);
-  --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;
+  --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;--b1:#cde2fb;--b2:#86b6ef;--b3:#3987e5;--b4:#256abf;--b5:#184f95;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
@@ -93,6 +93,11 @@ td.n,th.n{text-align:right}
 .shield .st .dot{width:12px;height:12px}.shield.on .st .dot{background:var(--critical);animation:pulse 1.2s infinite}
 .shield .st .dot{background:var(--ink-3)}
 .shield .why{color:var(--ink-2);font-size:13px;flex:1;min-width:200px}
+.rosewrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap;justify-content:center}
+#cRose{width:100%;max-width:260px;height:auto;overflow:visible}#cRose text{fill:var(--ink-3);font-size:10px}
+#cRose .card{fill:var(--ink-2);font-size:12px;font-weight:600}
+.rlegend{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-2)}
+.rlegend span{display:flex;align-items:center;gap:6px}.rlegend i{width:12px;height:12px;border-radius:3px;display:inline-block}
 .live-only{display:none}body.live .live-only{display:block}
 @media (max-width:900px){.hero,.tiles,.chart,.half{grid-column:span 12}.tiles{grid-template-columns:repeat(2,1fr)}.fc{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:520px){.big{font-size:52px}.tiles{grid-template-columns:1fr 1fr}.fc{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -162,9 +167,11 @@ td.n,th.n{text-align:right}
 
     <section class="card chart"><div class="head"><h2>Temperature</h2><span class="now" id="nTemp"></span></div><svg class="viz" id="cTemp"></svg></section>
     <section class="card chart"><div class="head"><h2>Pressure (sea level)</h2><span class="now" id="nPres"></span></div><svg class="viz" id="cPres"></svg></section>
-    <section class="card chart"><div class="head"><h2>Wind</h2><span class="legend"><span><i class="sw up"></i>Rising</span><span><i class="sw dn"></i>Easing</span><span><i class="wk"></i>Lull–gust</span></span><span class="now" id="nWind"></span></div><svg class="viz" id="cWind"></svg></section>
+    <section class="card chart"><div class="head"><h2>Wind</h2><span class="legend"><span><i class="sw up"></i>Rising</span><span><i class="sw dn"></i>Easing</span><span><i class="wk"></i>Lull–gust</span><span>▲ blowing toward</span></span><span class="now" id="nWind"></span></div><svg class="viz" id="cWind"></svg></section>
+    <section class="card chart"><div class="head"><h2>Wind direction</h2><span class="now" id="nRose"></span></div>
+      <div class="rosewrap"><svg id="cRose" viewBox="-130 -130 260 260" role="img" aria-label="Wind rose"></svg><div class="rlegend" id="roseLeg"></div></div></section>
     <section class="card chart"><div class="head"><h2>Rain (accumulated over range)</h2><span class="now" id="nRain"></span></div><svg class="viz" id="cRain"></svg></section>
-    <section class="card chart wide"><div class="head"><h2>Lightning strikes · distance (mi)</h2><span class="now" id="nLtg"></span></div><svg class="viz" id="cLtg" style="height:140px"></svg></section>
+    <section class="card chart"><div class="head"><h2>Lightning strikes · distance (mi)</h2><span class="now" id="nLtg"></span></div><svg class="viz" id="cLtg"></svg></section>
 
     <section class="card wide" style="grid-column:span 12"><h2>7-day forecast</h2><div class="fc" id="fc"></div></section>
 
@@ -247,7 +254,7 @@ function chart(svg, rows, series, opt = {}) {
 
 /* ---------- wind candlesticks: body = average speed open→close, wick = lull→gust ---------- */
 function candleChart(svg, rows, x0, x1) {
-  const W = svg.clientWidth || 600, H = svg.clientHeight || 180, L = 40, R = 8, T = 8, B = 22;
+  const W = svg.clientWidth || 600, H = svg.clientHeight || 180, L = 40, R = 8, T = 24, B = 22;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   if (!rows.length) { svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle">No data yet</text>`; return; }
   const bk = rows[0].bucket, mx = Math.max(10, ...rows.map(r => r.high)), step = mx <= 20 ? 5 : mx <= 50 ? 10 : 20, hi0 = Math.ceil(mx / step) * step;
@@ -266,6 +273,7 @@ function candleChart(svg, rows, x0, x1) {
     const yt = Y(Math.max(r.open, r.close)), yb = Y(Math.min(r.open, r.close)), h = Math.max(2, yb - yt);
     g += `<line x1="${cx}" x2="${cx}" y1="${Y(r.high)}" y2="${Y(r.low)}" stroke="var(--ink-3)" stroke-width="1.5" stroke-linecap="round"/>`;
     g += `<rect x="${cx - bw / 2}" y="${yt}" width="${bw}" height="${h}" rx="${Math.min(2, bw / 4)}" fill="${col}" stroke="var(--surface)" stroke-width="1"/>`;
+    if (r.dir != null && slot >= 9) g += `<g transform="translate(${cx},10) rotate(${(r.dir + 180) % 360})"><path d="M0,-6 L4,4 L0,2 L-4,4Z" fill="var(--ink-2)"/></g>`;
     g += `<rect class="hit" data-i="${i}" x="${cx - Math.max(bw, slot) / 2}" y="${T}" width="${Math.max(bw, slot)}" height="${H - T - B}" fill="transparent"/>`;
   });
   svg.innerHTML = g;
@@ -278,8 +286,36 @@ function candleChart(svg, rows, x0, x1) {
   svg.onmouseleave = () => tip.style.display = "none";
 }
 
+/* ---------- wind rose: petals point to where the wind comes FROM; length = share of time ---------- */
+function roseChart(r) {
+  const svg = $("cRose"); if (!r) return;
+  const B = r.bands.length, cols = Array.from({length: B}, (_, i) => `var(--b${i + 1})`);
+  const labs = r.bands.map((lo, i) => i < B - 1 ? `${lo}–${r.bands[i + 1]} mph` : `${lo}+ mph`);
+  $("roseLeg").innerHTML = labs.map((l, i) => `<span><i style="background:${cols[i]}"></i>${l}</span>`).join("") + `<span>Calm ${fmt(r.calm_pct)}%</span>`;
+  if (!r.total) { svg.innerHTML = `<text text-anchor="middle">No data yet</text>`; return; }
+  const tot = r.sectors.map(s => s.pct.reduce((a, b) => a + b, 0)), mx = Math.max(5, ...tot);
+  const step = mx <= 10 ? 2.5 : mx <= 25 ? 5 : 10, top = Math.ceil(mx / step) * step, R0 = 14, R1 = 108;
+  const rad = p => R0 + (R1 - R0) * p / top;
+  let g = "";
+  for (let p = step; p <= top + 1e-9; p += step) { const t = 78.75 * Math.PI / 180; g += `<circle r="${rad(p)}" fill="none" stroke="var(--grid)"/><text x="${Math.sin(t) * rad(p)}" y="${-Math.cos(t) * rad(p) - 2}" text-anchor="middle">${p}%</text>`; }
+  for (let i = 0; i < 16; i++) { const a = i * 22.5 * Math.PI / 180; g += `<line x1="${Math.sin(a) * R0}" y1="${-Math.cos(a) * R0}" x2="${Math.sin(a) * R1}" y2="${-Math.cos(a) * R1}" stroke="var(--grid)"/>`; }
+  ["N", "E", "S", "W"].forEach((c, i) => { const a = i * Math.PI / 2; g += `<text class="card" x="${Math.sin(a) * (R1 + 13)}" y="${-Math.cos(a) * (R1 + 13) + 4}" text-anchor="middle">${c}</text>`; });
+  const wedge = (deg, r0, r1) => { const h = 9.5 * Math.PI / 180, a = deg * Math.PI / 180, p = (r, t) => `${(Math.sin(t) * r).toFixed(2)},${(-Math.cos(t) * r).toFixed(2)}`;
+    return `M${p(r0, a - h)} L${p(r1, a - h)} A${r1},${r1} 0 0,1 ${p(r1, a + h)} L${p(r0, a + h)} A${r0},${r0} 0 0,0 ${p(r0, a - h)}Z`; };
+  r.sectors.forEach((s, i) => { let acc = 0;
+    s.pct.forEach((p, b) => { if (p <= 0) return; const r0 = rad(acc), r1 = rad(acc + p); acc += p;
+      g += `<path d="${wedge(s.deg, r0, r1)}" fill="${cols[b]}" stroke="var(--surface)" stroke-width="1" data-t="${s.dir} · ${labs[b]}: ${fmt(p, 1)}% of the time (all speeds from ${s.dir}: ${fmt(tot[i], 1)}%)"/>`; }); });
+  g += `<circle r="${R0 - 1}" fill="var(--surface)" stroke="var(--grid)"/><text text-anchor="middle" y="4">${fmt(r.calm_pct)}%</text>`;
+  svg.innerHTML = g;
+  const best = r.sectors[tot.indexOf(Math.max(...tot))];
+  $("nRose").textContent = `Mostly from ${best.dir}`;
+  svg.onmousemove = e => { const t = e.target.dataset && e.target.dataset.t; if (!t) { tip.style.display = "none"; return; }
+    tip.textContent = t; tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY - 12 - tip.offsetHeight) + "px"; };
+  svg.onmouseleave = () => tip.style.display = "none";
+}
+
 /* ---------- data ---------- */
-let hist = [], candles = [];
+let hist = [], candles = [], rose = null;
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 function drawAll() {
   const c1 = css("--s1"), c2 = css("--s2"), now = Date.now() / 1000, x0 = now - hours * 3600;
@@ -287,6 +323,7 @@ function drawAll() {
   chart($("cTemp"), hist, [{k: "temp_f", l: "Temp", c: c1, area: true}], {u: "°F", span: 4, x0, x1: now, gap});
   chart($("cPres"), hist, [{k: "pressure_inhg", l: "Pressure", c: c1}], {u: " inHg", dec: 2, span: .06, x0, x1: now, gap});
   candleChart($("cWind"), candles, x0, now);
+  roseChart(rose);
   chart($("cRain"), hist, [{k: "rain_cum_in", l: "Rain", c: c1, area: true}], {u: " in", dec: 2, zero: true, span: .1, x0, x1: now, gap});
   chart($("cLtg"), strikes, [{k: "mi", l: "Distance", c: c2}], {u: " mi", zero: true, span: 10, dots: true, x0, x1: now});
   chart($("cLive"), live, [{k: "mph", l: "Wind", c: c1}], {u: " mph", zero: true, span: 10, dec: 1, x0: now - 1800, x1: now, gap: 30});
@@ -297,7 +334,7 @@ function drawAll() {
 }
 const j = u => fetch(u).then(r => r.json());
 async function loadHistory() {
-  [hist, strikes, candles] = await Promise.all([j(`/api/history?hours=${hours}`), j(`/api/strikes?hours=${hours}`), j(`/api/wind_candles?hours=${hours}`)]);
+  [hist, strikes, candles, rose] = await Promise.all([j(`/api/history?hours=${hours}`), j(`/api/strikes?hours=${hours}`), j(`/api/wind_candles?hours=${hours}`), j(`/api/wind_rose?hours=${hours}`)]);
   if (document.body.classList.contains("live")) live = await j("/api/rapid?minutes=30");
   drawAll();
 }

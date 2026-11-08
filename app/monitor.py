@@ -1012,6 +1012,27 @@ def build_app(mon: Monitor):
                             dir=d, card=cardinal(d), n=c["n"]))
         return web.json_response(res)
 
+    async def wind_rose(req):
+        """Share of time the wind came from each of 16 directions, split by speed band (mph)."""
+        hours = min(float(req.query.get("hours", 24)), 24 * 31)
+        bands = [0, 5, 10, 15, 20]  # lower edges, mph; calm = average under 1 mph
+        rows = mon.db.q("SELECT wind_avg, wind_dir FROM obs WHERE ts>=? AND wind_avg IS NOT NULL",
+                        (mon.since(hours * 3600),))
+        grid = [[0] * len(bands) for _ in range(16)]
+        calm = 0
+        for x in rows:
+            mph = ms_to_mph(x["wind_avg"])
+            if mph < 1 or x["wind_dir"] is None:
+                calm += 1
+                continue
+            sec = int((x["wind_dir"] % 360) / 22.5 + 0.5) % 16
+            b = max(i for i, lo in enumerate(bands) if mph >= lo)
+            grid[sec][b] += 1
+        n = len(rows) or 1
+        return web.json_response(dict(
+            total=len(rows), calm_pct=100 * calm / n, bands=bands,
+            sectors=[dict(dir=cardinal(i * 22.5), deg=i * 22.5, pct=[100 * c / n for c in grid[i]]) for i in range(16)]))
+
     async def strikes(req):
         hours = min(float(req.query.get("hours", 24)), 24 * 31)
         rows = mon.db.q("SELECT ts, dist_km FROM strikes WHERE ts>=? ORDER BY ts", (mon.since(hours * 3600),))
@@ -1066,6 +1087,7 @@ def build_app(mon: Monitor):
     r.add_get("/api/rapid", rapid)
     r.add_get("/api/strikes", strikes)
     r.add_get("/api/wind_candles", wind_candles)
+    r.add_get("/api/wind_rose", wind_rose)
     r.add_get("/api/storms", storms)
     r.add_get("/api/events", events)
     r.add_get("/api/daily", daily)
