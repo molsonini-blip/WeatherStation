@@ -80,12 +80,36 @@ outdoor smart plugs. storm_end → push a notification with the totals. high_win
 IFTTT's **WeatherFlow / Tempest** service has its own triggers, such as rain detected and lightning detected.
 Use these as a backup that keeps working even if your server is down.
 
+## Car hail cover (smart plug)
+
+The monitor can switch a smart plug that powers an inflatable car cover.
+
+- **Inflates** (`tempest_hail_shield_on`) as soon as hail is expected or happening:
+  an NWS warning with hail for your location, an NWS watch that mentions hail (`HAIL_SHIELD_ON_WATCH`), or hail hitting your Tempest.
+- **Stays up** for the rest of the storm, then **deflates** (`tempest_hail_shield_off`) once no hail is expected and
+  `HAIL_SHIELD_OFF_DELAY_MIN` (60 min) has passed. If hail returns in that hour, the timer resets.
+- **Dashboard control:** the Car hail cover card shows the status and has **Auto / On / Off** buttons.
+  On and Off are manual overrides that pause automation until you pick Auto again. Use On to test the plug.
+- The state survives restarts.
+
+Make two IFTTT applets: Webhooks `tempest_hail_shield_on` → your plug's **Turn on**, and `tempest_hail_shield_off` → **Turn off**.
+Or set `HAIL_SHIELD_ON_URL` / `HAIL_SHIELD_OFF_URL` to call Home Assistant or the plug's own API directly (a POST to each URL), which skips IFTTT.
+
+| Setting | Default | |
+|---|---|---|
+| `HAIL_SHIELD` | true | turn the feature on/off |
+| `HAIL_SHIELD_ON_WATCH` | true | inflate for hail **watches** too (not just warnings) |
+| `HAIL_SHIELD_MIN_IN` | 0 | minimum forecast hail size, inches |
+| `HAIL_SHIELD_OFF_DELAY_MIN` | 60 | how long after the storm before deflating |
+| `HAIL_SHIELD_MAX_HOURS` | 0 | safety cutoff (0 = none) |
+| `HAIL_SHIELD_RESEND_MIN` | 0 | re-send "on" every N min while inflated, in case a plug command is missed (costs IFTTT credits) |
+
 ## API
 
 These endpoints are useful for Home Assistant, Grafana, or your LLM stack:
 
 `/api/state` · `/api/history?hours=24` · `/api/rapid?minutes=30` · `/api/strikes?hours=24` ·
-`/api/storms` · `/api/events` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
+`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
 `POST /api/test-ifttt`
 
 ## Notes

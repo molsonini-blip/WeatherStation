@@ -81,6 +81,15 @@ class Config:
     normal_nws_min: float = env("NORMAL_NWS_MIN", 5, float)
     alert_hail_min_in: float = env("ALERT_HAIL_MIN_IN", 0.0, float)  # NWS hail size that triggers an alert
     hail_cooldown_min: float = env("HAIL_COOLDOWN_MIN", 15, float)
+    # hail shield (smart plug powering an inflatable car cover)
+    shield_enabled: bool = env("HAIL_SHIELD", "true").lower() in ("1", "true", "yes", "on")
+    shield_on_watch: bool = env("HAIL_SHIELD_ON_WATCH", "true").lower() in ("1", "true", "yes", "on")
+    shield_min_in: float = env("HAIL_SHIELD_MIN_IN", 0.0, float)
+    shield_off_delay_min: float = env("HAIL_SHIELD_OFF_DELAY_MIN", 60, float)
+    shield_max_hours: float = env("HAIL_SHIELD_MAX_HOURS", 0, float)  # 0 = no limit
+    shield_resend_min: float = env("HAIL_SHIELD_RESEND_MIN", 0, float)  # re-send "on" while active; 0 = off
+    shield_on_url: str | None = env("HAIL_SHIELD_ON_URL")   # optional direct webhook (Home Assistant, plug API)
+    shield_off_url: str | None = env("HAIL_SHIELD_OFF_URL")
     live_forecast_min: float = env("LIVE_FORECAST_MIN", 15, float)
     live_nws_min: float = env("LIVE_NWS_MIN", 2, float)
     daily_summary_time: str = env("DAILY_SUMMARY_TIME", "07:00")
@@ -94,7 +103,7 @@ REST = "https://swd.weatherflow.com/swd/rest"
 WS_URL = "wss://ws.weatherflow.com/swd/data"
 STATIC = Path(__file__).parent / "static"
 
-ALERT_LABELS = dict(hail="Hail at station", hail_warning="Hail warning", watch_start="Storm watch", storm_start="Storm started", storm_end="Storm ended",
+ALERT_LABELS = dict(hail_shield_on="Hail shield ON", hail_shield_off="Hail shield OFF", hail="Hail at station", hail_warning="Hail warning", watch_start="Storm watch", storm_start="Storm started", storm_end="Storm ended",
                     all_clear="All clear", lightning_close="Close lightning", high_wind="High wind",
                     heavy_rain="Heavy rain", nws_alert="NWS", daily="Daily summary", offline="Station offline",
                     test="Test")
@@ -230,6 +239,8 @@ class Monitor:
     clients: set = field(default_factory=set)
     offline_alerted: bool = False
     _mode_changed: asyncio.Event = field(default_factory=asyncio.Event)
+    shield: dict = field(default_factory=lambda: dict(on=False, mode="auto", since=None, clear_since=None,
+                                                      reason="", last_sent=0))
 
     @property
     def live(self):
@@ -439,6 +450,80 @@ class Monitor:
         # otherwise keep the last reasons while the clear-out timer runs
         if new != self.mode:
             self.transition(self.mode, new)
+        self.update_shield()
+
+    # --------------------------------------------------------------- hail shield (smart plug)
+    def hail_threats(self):
+        """Reasons hail is expected or happening right now (empty list = none)."""
+        out = []
+        for a in self.nws:
+            h = a.get("hail_in")
+            if h is None or (h and h < CFG.shield_min_in):
+                continue
+            if "Warning" in a["event"] or (CFG.shield_on_watch and "Watch" in a["event"]):
+                out.append(f"{a['event']}" + (f" ({h:.2f} in hail)" if h else " (hail)"))
+        if self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND precip_type IN (2,3)",
+                     (self.since(max(CFG.storm_lookback_min, 15) * 60),))[0]["n"]:
+            out.append("hail detected at station")
+        return out
+
+    def update_shield(self):
+        sh, now = self.shield, time.time()
+        if not CFG.shield_enabled:
+            return
+        if sh["mode"] in ("on", "off"):  # manual override from the dashboard
+            want, why = sh["mode"] == "on", f"manual {sh['mode']}"
+        else:
+            threats = self.hail_threats()
+            if threats:
+                sh["clear_since"] = None
+                want, why = True, "; ".join(threats)
+            elif sh["on"]:
+                # keep it up through the rest of the storm, then wait the off-delay
+                if self.mode == "storm":
+                    sh["clear_since"] = None
+                elif not sh["clear_since"]:
+                    sh["clear_since"] = now
+                    self.log_event("shield", f"No hail expected; cover stays up {CFG.shield_off_delay_min:.0f} more min")
+                want = not (sh["clear_since"] and now - sh["clear_since"] >= CFG.shield_off_delay_min * 60)
+                why = "storm over, no more hail expected" if not want else sh["reason"]
+                if CFG.shield_max_hours and sh["since"] and now - sh["since"] > CFG.shield_max_hours * 3600:
+                    want, why = False, f"safety limit {CFG.shield_max_hours:g} h reached"
+            else:
+                want, why = False, ""
+        if want != sh["on"]:
+            sh.update(on=want, since=now if want else None, clear_since=None, reason=why if want else "")
+            self.send_shield(want, why)
+        elif want and CFG.shield_resend_min and now - sh["last_sent"] > CFG.shield_resend_min * 60:
+            self.send_shield(True, sh["reason"], resend=True)
+        self.db.kv_set("shield", sh)
+
+    def send_shield(self, on, why, resend=False):
+        self.shield["last_sent"] = time.time()
+        name = "hail_shield_on" if on else "hail_shield_off"
+        if not resend:
+            self.log_event(f"alert:{name}", f"{ALERT_LABELS[name]}: {why}")
+            self.push("shield", self.shield_state())
+        loop = asyncio.get_event_loop()
+        loop.create_task(self.send_ifttt(name, "Inflating car cover" if on else "Deflating car cover", why,
+                                         self.station.get("name") or ""))
+        url = CFG.shield_on_url if on else CFG.shield_off_url
+        if url and self.http:
+            async def hit():
+                try:
+                    async with self.http.post(url) as r:
+                        log.info("shield %s webhook -> HTTP %s", "on" if on else "off", r.status)
+                except Exception as e:
+                    log.warning("shield webhook failed: %s", e)
+            loop.create_task(hit())
+
+    def shield_state(self):
+        sh = self.shield
+        left = None
+        if sh["on"] and sh["clear_since"]:
+            left = max(0, CFG.shield_off_delay_min * 60 - (time.time() - sh["clear_since"]))
+        return dict(enabled=CFG.shield_enabled, on=sh["on"], mode=sh["mode"], since=sh["since"],
+                    reason=sh["reason"], off_in_s=left, threats=self.hail_threats())
 
     def transition(self, old, new):
         now = time.time()
@@ -536,7 +621,7 @@ class Monitor:
             strikes_1h=n1h, nearest_strike_1h_mi=d1h,
             last_strike=dict(ts=last[0]["ts"], mi=km_to_mi(last[0]["dist_km"])) if last else None,
             battery=o.get("battery"), rapid=self.rapid, precip_type=o.get("precip_type"),
-            last_packet=self.last_packet or None, ifttt=bool(CFG.ifttt_key),
+            last_packet=self.last_packet or None, ifttt=bool(CFG.ifttt_key), shield=self.shield_state(),
         )
 
     # --------------------------------------------------------------- REST helpers
@@ -913,6 +998,23 @@ def build_app(mon: Monitor):
     r.add_get("/api/daily", daily)
     r.add_get("/api/stream", stream)
     r.add_post("/api/test-ifttt", test_ifttt)
+
+    async def shield(req):
+        if req.method == "POST":
+            body = await req.json()
+            mode = body.get("mode")
+            if mode not in ("auto", "on", "off"):
+                return web.json_response(dict(error="mode must be auto, on or off"), status=400)
+            mon.shield["mode"] = mode
+            if mode == "auto" and mon.shield["on"] and not mon.hail_threats():
+                mon.shield["clear_since"] = time.time() - CFG.shield_off_delay_min * 60  # nothing expected: off now
+            mon.log_event("shield", f"Hail shield set to {mode.upper()} from the dashboard")
+            mon.update_shield()
+            mon.push("shield", mon.shield_state())
+        return web.json_response(mon.shield_state())
+
+    r.add_get("/api/shield", shield)
+    r.add_post("/api/shield", shield)
     r.add_static("/static", STATIC)
     return app
 
@@ -926,6 +1028,9 @@ async def main():
     mon = Monitor(DB(CFG.db_path))
     mon.http = ClientSession(timeout=ClientTimeout(total=30))
     # resume an open storm across restarts
+    saved = mon.db.kv_get("shield")
+    if saved:
+        mon.shield.update(saved)
     open_storm = mon.db.kv_get("open_storm")
     if open_storm:
         mon.storm_id, mon.storm_start = open_storm["id"], open_storm["start"]
