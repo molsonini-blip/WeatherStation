@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tempest Monitor</title>
+<style>
+:root{
+  color-scheme:light;
+  --bg:#f4f3ef;--surface:#fcfcfb;--surface-2:#f0efea;--ink:#0b0b0b;--ink-2:#52514e;--ink-3:#7a7974;
+  --grid:#e1e0d9;--axis:#c3c2b7;--ring:rgba(11,11,11,.10);
+  --s1:#2a78d6;--s2:#eb6834;--s1-soft:rgba(42,120,214,.14);
+  --good:#0ca30c;--warning:#fab219;--serious:#ec835a;--critical:#d03b3b;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  color-scheme:dark;
+  --bg:#111110;--surface:#1a1a19;--surface-2:#222220;--ink:#f0efec;--ink-2:#c3c2b7;--ink-3:#8f8e88;
+  --grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);
+  --s1:#3987e5;--s2:#d95926;--s1-soft:rgba(57,135,229,.18);
+}}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#111110;--surface:#1a1a19;--surface-2:#222220;--ink:#f0efec;--ink-2:#c3c2b7;--ink-3:#8f8e88;
+  --grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);
+  --s1:#3987e5;--s2:#d95926;--s1-soft:rgba(57,135,229,.18);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding:20px 16px 48px}
+header{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin-bottom:16px}
+h1{font-size:20px;margin:0;font-weight:650;letter-spacing:-.01em}
+.sub{color:var(--ink-2);font-size:13px}
+.spacer{flex:1}
+.badge{display:inline-flex;align-items:center;gap:8px;padding:6px 12px;border-radius:999px;font-weight:600;font-size:13px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--ring)}
+.dot{width:10px;height:10px;border-radius:50%;background:var(--good)}
+.badge.watch .dot{background:var(--warning)} .badge.storm .dot{background:var(--critical);animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.35}}
+button,.seg button{font:inherit;color:var(--ink);background:var(--surface);border:0;box-shadow:inset 0 0 0 1px var(--ring);border-radius:8px;padding:6px 10px;cursor:pointer}
+button:hover{background:var(--surface-2)}
+.seg{display:inline-flex;gap:4px}.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+.banner{display:none;border-radius:12px;padding:12px 14px;margin-bottom:16px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--ring),inset 4px 0 0 var(--warning)}
+.banner.storm{box-shadow:inset 0 0 0 1px var(--ring),inset 4px 0 0 var(--critical)}
+.banner.show{display:block}.banner b{font-weight:650}
+.grid{display:grid;gap:12px;grid-template-columns:repeat(12,1fr)}
+.card{background:var(--surface);border-radius:14px;padding:14px 16px;box-shadow:inset 0 0 0 1px var(--ring);min-width:0}
+.card h2{font-size:12px;font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em;margin:0 0 8px}
+.hero{grid-column:span 4;display:flex;flex-direction:column;justify-content:space-between}
+.big{font-size:64px;font-weight:300;letter-spacing:-.03em;line-height:1}
+.big small{font-size:28px;color:var(--ink-2)}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;color:var(--ink-2);font-size:13px;margin-top:10px}
+.kv b{color:var(--ink);font-weight:550;text-align:right}
+.tiles{grid-column:span 8;display:grid;gap:12px;grid-template-columns:repeat(3,1fr)}
+.tile .v{font-size:28px;font-weight:500;letter-spacing:-.02em}
+.tile .v small{font-size:14px;color:var(--ink-2);font-weight:400;margin-left:2px}
+.tile .d{color:var(--ink-2);font-size:13px;margin-top:2px}
+.compass{float:right;width:48px;height:48px}
+.chart{grid-column:span 6}.chart.wide{grid-column:span 12}
+.chart .head{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.chart .head h2{margin:0}.chart .head .now{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums}
+.legend{display:flex;gap:12px;font-size:12px;color:var(--ink-2)}
+.legend i{display:inline-block;width:12px;height:2px;vertical-align:middle;margin-right:4px}
+svg.viz{width:100%;height:180px;display:block;overflow:visible}
+.viz text{fill:var(--ink-3);font-size:11px}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--surface);padding:6px 8px;border-radius:8px;font-size:12px;white-space:nowrap;display:none;z-index:9;font-variant-numeric:tabular-nums}
+.fc{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;text-align:center}
+.fc div{padding:6px 2px;border-radius:10px;background:var(--surface-2)}
+.fc .dn{font-weight:600}.fc .c{font-size:12px;color:var(--ink-2);min-height:32px}
+table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:13px}
+th{color:var(--ink-2);font-weight:550;text-align:left;padding:6px 8px;border-bottom:1px solid var(--grid)}
+td{padding:6px 8px;border-bottom:1px solid var(--grid)}
+td.n,th.n{text-align:right}
+.log{max-height:280px;overflow:auto}
+.log div{display:flex;gap:10px;padding:5px 0;border-bottom:1px solid var(--grid);font-size:13px}
+.log time{color:var(--ink-3);min-width:96px;font-variant-numeric:tabular-nums}
+.empty{color:var(--ink-3);font-size:13px;padding:8px 0}
+.half{grid-column:span 6}
+.live-only{display:none}body.live .live-only{display:block}
+@media (max-width:900px){.hero,.tiles,.chart,.half{grid-column:span 12}.tiles{grid-template-columns:repeat(2,1fr)}.fc{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (max-width:520px){.big{font-size:52px}.tiles{grid-template-columns:1fr 1fr}.fc{grid-template-columns:repeat(3,minmax(0,1fr))}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <h1 id="station">Tempest Monitor</h1>
+      <div class="sub" id="fresh">Connecting…</div>
+    </div>
+    <div class="spacer"></div>
+    <span class="badge" id="badge" role="status"><span class="dot"></span><span id="modeLabel">Normal</span></span>
+    <div class="seg" id="range" aria-label="History range">
+      <button data-h="6">6h</button><button data-h="24" aria-pressed="true">24h</button><button data-h="72">3d</button><button data-h="168">7d</button>
+    </div>
+    <button id="themeBtn" title="Toggle light/dark">Theme</button>
+  </header>
+
+  <div class="banner" id="banner"></div>
+
+  <div class="grid">
+    <section class="card hero">
+      <div>
+        <h2>Now</h2>
+        <div class="big" id="temp">--<small>°F</small></div>
+        <div class="sub" id="cond"></div>
+      </div>
+      <div class="kv">
+        <span>Dew point</span><b id="dew">--</b>
+        <span>Humidity</span><b id="rh">--</b>
+        <span>UV / solar</span><b id="uv">--</b>
+        <span>Battery</span><b id="batt">--</b>
+      </div>
+    </section>
+
+    <section class="tiles">
+      <div class="card tile">
+        <svg class="compass" viewBox="-24 -24 48 48" aria-hidden="true"><circle r="21" fill="none" stroke="var(--grid)" stroke-width="2"/><g id="arrow"><path d="M0,-18 L5,4 L0,0 L-5,4Z" fill="var(--s1)"/></g></svg>
+        <h2>Wind <span style="font-weight:400;text-transform:none" id="windLive"></span></h2>
+        <div class="v" id="wind">--<small>mph</small></div>
+        <div class="d" id="windD">&nbsp;</div>
+      </div>
+      <div class="card tile"><h2>Rain today</h2><div class="v" id="rain">--<small>in</small></div><div class="d" id="rainD">&nbsp;</div></div>
+      <div class="card tile"><h2>Pressure</h2><div class="v" id="pres">--<small>inHg</small></div><div class="d" id="presD">&nbsp;</div></div>
+      <div class="card tile"><h2>Lightning</h2><div class="v" id="ltg">--</div><div class="d" id="ltgD">&nbsp;</div></div>
+      <div class="card tile"><h2>Today's forecast</h2><div class="v" id="fcT">--</div><div class="d" id="fcD">&nbsp;</div></div>
+      <div class="card tile"><h2>Alerts</h2><div class="v" id="nwsN">--</div><div class="d" id="nwsD">&nbsp;</div></div>
+    </section>
+
+    <section class="card chart wide live-only" id="liveCard">
+      <div class="head"><h2>Live wind · 3-second samples, last 30 min</h2><span class="now" id="liveNow"></span></div>
+      <svg class="viz" id="cLive"></svg>
+    </section>
+
+    <section class="card chart"><div class="head"><h2>Temperature</h2><span class="now" id="nTemp"></span></div><svg class="viz" id="cTemp"></svg></section>
+    <section class="card chart"><div class="head"><h2>Pressure (sea level)</h2><span class="now" id="nPres"></span></div><svg class="viz" id="cPres"></svg></section>
+    <section class="card chart"><div class="head"><h2>Wind</h2><span class="legend"><span><i style="background:var(--s1)"></i>Average</span><span><i style="background:var(--s2)"></i>Gust</span></span><span class="now" id="nWind"></span></div><svg class="viz" id="cWind"></svg></section>
+    <section class="card chart"><div class="head"><h2>Rain (accumulated over range)</h2><span class="now" id="nRain"></span></div><svg class="viz" id="cRain"></svg></section>
+    <section class="card chart wide"><div class="head"><h2>Lightning strikes · distance (mi)</h2><span class="now" id="nLtg"></span></div><svg class="viz" id="cLtg" style="height:140px"></svg></section>
+
+    <section class="card wide" style="grid-column:span 12"><h2>7-day forecast</h2><div class="fc" id="fc"></div></section>
+
+    <section class="card half"><h2>Storm log</h2><div id="storms" class="log"></div></section>
+    <section class="card half"><h2>Activity</h2><div id="events" class="log"></div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center"><button id="testBtn">Send IFTTT test</button><span class="sub" id="testMsg"></span></div>
+    </section>
+
+    <section class="card" style="grid-column:span 12"><h2>Daily records</h2><div style="overflow:auto"><table id="daily"></table></div></section>
+  </div>
+</div>
+<div class="tip" id="tip"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const fmt = (v, d = 0) => v == null || isNaN(v) ? "--" : Number(v).toFixed(d);
+const tz = {hour: "numeric", minute: "2-digit"};
+const tstr = ts => new Date(ts * 1000).toLocaleTimeString([], tz);
+const dtstr = ts => new Date(ts * 1000).toLocaleString([], {month: "short", day: "numeric", ...tz});
+const ago = ts => { const s = Date.now() / 1000 - ts; return s < 90 ? `${Math.round(s)}s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
+let state = {}, hours = 24, live = [], strikes = [];
+
+/* theme toggle (per-viewer convenience) */
+try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
+$("themeBtn").onclick = () => {
+  const dark = getComputedStyle(document.documentElement).colorScheme.includes("dark");
+  const t = dark ? "light" : "dark"; document.documentElement.dataset.theme = t;
+  try { localStorage.setItem("theme", t); } catch (e) {}
+  drawAll();
+};
+
+/* ---------- chart: single-axis SVG line/area with crosshair tooltip ---------- */
+const tip = $("tip");
+function chart(svg, rows, series, opt = {}) {
+  const W = svg.clientWidth || 600, H = svg.clientHeight || 180, L = 40, R = 8, T = 8, B = 22;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  if (!rows.length) { svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle">No data yet</text>`; return; }
+  const xs = rows.map(r => r.ts), x0 = opt.x0 ?? xs[0], x1 = opt.x1 ?? xs[xs.length - 1] ?? x0 + 1;
+  let vals = []; series.forEach(s => rows.forEach(r => r[s.k] != null && vals.push(r[s.k])));
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  if (opt.zero) lo = 0; if (opt.min != null) hi = Math.max(hi, opt.min);
+  if (hi - lo < (opt.span || 1e-9)) { const m = (hi + lo) / 2, h = (opt.span || 1) / 2; lo = opt.zero ? 0 : m - h; hi = opt.zero ? Math.max(hi, opt.span || 1) : m + h; }
+  const pad = (hi - lo) * .08; if (!opt.zero) lo -= pad; hi += pad;
+  const X = t => L + (t - x0) / Math.max(1, x1 - x0) * (W - L - R), Y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  let g = "";
+  const ticks = 4;
+  for (let i = 0; i <= ticks; i++) { const v = lo + (hi - lo) * i / ticks, y = Y(v);
+    g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--grid)" stroke-width="1"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${fmt(v, opt.dec ?? 0)}</text>`; }
+  const span = x1 - x0, nx = Math.max(2, Math.floor((W - L) / 110));
+  for (let i = 0; i <= nx; i++) { const t = x0 + span * i / nx;
+    const lab = span > 2 * 86400 ? new Date(t * 1000).toLocaleDateString([], {weekday: "short", hour: "numeric"}) : new Date(t * 1000).toLocaleTimeString([], {hour: "numeric", minute: span < 7200 ? "2-digit" : undefined});
+    g += `<text x="${X(t)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === nx ? "end" : "middle"}">${lab}</text>`; }
+  g += `<line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="var(--axis)"/>`;
+  series.forEach(s => {
+    if (opt.dots) { rows.forEach(r => r[s.k] != null && (g += `<circle cx="${X(r.ts)}" cy="${Y(r[s.k])}" r="4" fill="${s.c}" stroke="var(--surface)" stroke-width="2"/>`)); return; }
+    let d = "", pen = false, prev = null;
+    rows.forEach(r => { const v = r[s.k]; if (v == null || (prev && r.ts - prev > (opt.gap || 600))) pen = false;
+      if (v != null) { d += `${pen ? "L" : "M"}${X(r.ts).toFixed(1)},${Y(v).toFixed(1)}`; pen = true; } prev = r.ts; });
+    if (s.area) g += `<path d="${d}L${X(rows[rows.length - 1].ts)},${Y(lo)}L${X(rows[0].ts)},${Y(lo)}Z" fill="var(--s1-soft)"/>`;
+    g += `<path d="${d}" fill="none" stroke="${s.c}" stroke-width="${s.w || 2}" stroke-linejoin="round" stroke-linecap="round"/>`;
+  });
+  g += `<line class="xh" y1="${T}" y2="${H - B}" stroke="var(--ink-3)" stroke-dasharray="3 3" style="display:none"/>`;
+  series.forEach((s, i) => g += `<circle class="hp hp${i}" r="4" fill="${s.c}" stroke="var(--surface)" stroke-width="2" style="display:none"/>`);
+  g += `<rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/>`;
+  svg.innerHTML = g;
+  const xh = svg.querySelector(".xh");
+  svg.onmousemove = e => {
+    const b = svg.getBoundingClientRect(), mx = (e.clientX - b.left) * W / b.width, t = x0 + (mx - L) / (W - L - R) * (x1 - x0);
+    let best = rows[0]; for (const r of rows) if (Math.abs(r.ts - t) < Math.abs(best.ts - t)) best = r;
+    xh.setAttribute("x1", X(best.ts)); xh.setAttribute("x2", X(best.ts)); xh.style.display = "";
+    series.forEach((s, i) => { const c = svg.querySelector(".hp" + i); if (best[s.k] == null) { c.style.display = "none"; return; }
+      c.setAttribute("cx", X(best.ts)); c.setAttribute("cy", Y(best[s.k])); c.style.display = ""; });
+    tip.innerHTML = `${dtstr(best.ts)}<br>` + series.map(s => `${s.l}: <b>${fmt(best[s.k], opt.dec ?? 0)}${opt.u || ""}</b>`).join("<br>");
+    tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY - 12 - tip.offsetHeight) + "px";
+  };
+  svg.onmouseleave = () => { xh.style.display = "none"; svg.querySelectorAll(".hp").forEach(c => c.style.display = "none"); tip.style.display = "none"; };
+}
+
+/* ---------- data ---------- */
+let hist = [];
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+function drawAll() {
+  const c1 = css("--s1"), c2 = css("--s2"), now = Date.now() / 1000, x0 = now - hours * 3600;
+  const gap = hours > 48 ? 3600 : 600;
+  chart($("cTemp"), hist, [{k: "temp_f", l: "Temp", c: c1, area: true}], {u: "°F", span: 4, x0, x1: now, gap});
+  chart($("cPres"), hist, [{k: "pressure_inhg", l: "Pressure", c: c1}], {u: " inHg", dec: 2, span: .06, x0, x1: now, gap});
+  chart($("cWind"), hist, [{k: "wind_avg_mph", l: "Average", c: c1}, {k: "wind_gust_mph", l: "Gust", c: c2, w: 1.5}], {u: " mph", zero: true, span: 10, x0, x1: now, gap});
+  chart($("cRain"), hist, [{k: "rain_cum_in", l: "Rain", c: c1, area: true}], {u: " in", dec: 2, zero: true, span: .1, x0, x1: now, gap});
+  chart($("cLtg"), strikes, [{k: "mi", l: "Distance", c: c2}], {u: " mi", zero: true, span: 10, dots: true, x0, x1: now});
+  chart($("cLive"), live, [{k: "mph", l: "Wind", c: c1}], {u: " mph", zero: true, span: 10, dec: 1, x0: now - 1800, x1: now, gap: 30});
+  const last = hist[hist.length - 1] || {};
+  $("nTemp").textContent = fmt(last.temp_f) + "°F"; $("nPres").textContent = fmt(last.pressure_inhg, 2) + " inHg";
+  $("nWind").textContent = fmt(last.wind_avg_mph) + " mph"; $("nRain").textContent = fmt(last.rain_cum_in, 2) + " in";
+  $("nLtg").textContent = strikes.length ? `${strikes.length} strikes` : "none in range";
+}
+const j = u => fetch(u).then(r => r.json());
+async function loadHistory() {
+  [hist, strikes] = await Promise.all([j(`/api/history?hours=${hours}`), j(`/api/strikes?hours=${hours}`)]);
+  if (document.body.classList.contains("live")) live = await j("/api/rapid?minutes=30");
+  drawAll();
+}
+async function loadLists() {
+  const [storms, events, daily] = await Promise.all([j("/api/storms"), j("/api/events?limit=60"), j("/api/daily?days=14")]);
+  $("storms").innerHTML = storms.length ? storms.map(s => {
+    const m = s.summary;
+    return `<div><time>${dtstr(s.start_ts)}</time><span>${m ? `${m.duration_min} min · ${fmt(m.rain_in, 2)} in · gust ${fmt(m.max_gust_mph)} mph · ${m.strikes} strikes${m.closest_strike_mi ? ` (closest ${m.closest_strike_mi} mi)` : ""}` : `<b>In progress</b> · ${s.reasons.join("; ")}`}</span></div>`;
+  }).join("") : `<div class="empty">No storms recorded yet.</div>`;
+  $("events").innerHTML = events.length ? events.map(e => `<div><time>${dtstr(e.ts)}</time><span>${escapeHtml(e.message)}</span></div>`).join("") : `<div class="empty">Nothing yet.</div>`;
+  $("daily").innerHTML = `<tr><th>Day</th><th class="n">High</th><th class="n">Low</th><th class="n">Rain</th><th class="n">Max gust</th><th class="n">UV</th><th class="n">Strikes</th></tr>` +
+    daily.map(d => `<tr><td>${d.date}</td><td class="n">${d.hi_f}°</td><td class="n">${d.lo_f}°</td><td class="n">${fmt(d.rain_in, 2)} in</td><td class="n">${d.max_gust_mph} mph</td><td class="n">${fmt(d.uv, 1)}</td><td class="n">${d.strikes}</td></tr>`).join("");
+}
+const escapeHtml = s => String(s).replace(/[&<>"]/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"}[c]));
+
+function renderState(s) {
+  Object.assign(state, s);
+  s = state;
+  if (s.station) { $("station").textContent = s.station; document.title = `${s.station} · Tempest`; }
+  $("temp").innerHTML = `${fmt(s.temp_f)}<small>°F</small>`;
+  $("dew").textContent = fmt(s.dew_f) + "°F"; $("rh").textContent = fmt(s.rh) + "%";
+  $("uv").textContent = `${fmt(s.uv, 1)} / ${fmt(s.solar)} W/m²`; $("batt").textContent = fmt(s.battery, 2) + " V";
+  $("wind").innerHTML = `${fmt(s.wind_avg_mph)}<small>mph ${s.wind_card || ""}</small>`;
+  $("windD").textContent = `Gust ${fmt(s.wind_gust_mph)} · lull ${fmt(s.wind_lull_mph)} mph`;
+  if (s.wind_dir != null) $("arrow").setAttribute("transform", `rotate(${(s.wind_dir + 180) % 360})`);
+  $("rain").innerHTML = `${fmt(s.rain_today_in, 2)}<small>in</small>`;
+  $("rainD").textContent = s.rain_rate_inhr > 0 ? `Falling at ${fmt(s.rain_rate_inhr, 2)} in/hr` : "Not raining";
+  $("pres").innerHTML = `${fmt(s.pressure_inhg, 2)}<small>inHg</small>`;
+  const dp = s.pressure_trend_mb3h; $("presD").textContent = dp == null ? "Trend: collecting…" : `${dp <= -1 ? "Falling" : dp >= 1 ? "Rising" : "Steady"} (${dp > 0 ? "+" : ""}${fmt(dp, 1)} mb / 3 h)`;
+  $("ltg").innerHTML = s.strikes_1h ? `${s.strikes_1h}<small>in last hour</small>` : `0<small>in last hour</small>`;
+  $("ltgD").textContent = s.strikes_1h ? `Closest ${fmt(s.nearest_strike_1h_mi)} mi` : s.last_strike ? `Last: ${fmt(s.last_strike.mi)} mi, ${ago(s.last_strike.ts)}` : "None recorded";
+  const mode = s.mode || "normal";
+  $("badge").className = "badge " + mode; $("modeLabel").textContent = {normal: "Normal", watch: "Storm watch · live", storm: "Storm · live"}[mode];
+  document.body.classList.toggle("live", mode !== "normal");
+  const bn = $("banner");
+  bn.className = "banner" + (mode !== "normal" ? " show " + mode : "");
+  bn.innerHTML = mode === "storm" ? `<b>⚠ Storm in progress</b>${s.storm_start ? ` since ${tstr(s.storm_start)}` : ""} · ${escapeHtml((s.reasons || []).join(" · "))}`
+    : mode === "watch" ? `<b>◔ Storm watch</b> · ${escapeHtml((s.reasons || []).join(" · "))}` : "";
+  if (s.forecast) renderForecast(s.forecast);
+  if (s.nws) renderNws(s.nws);
+  freshness();
+}
+function renderForecast(f) {
+  const d = f.daily || [];
+  $("fc").innerHTML = d.map(x => `<div><div class="dn">${new Date(x.day_start_local * 1000).toLocaleDateString([], {weekday: "short"})}</div><div class="c">${escapeHtml(x.conditions || "")}</div><div>${fmt(x.air_temp_high)}° / ${fmt(x.air_temp_low)}°</div><div class="sub">${fmt(x.precip_probability)}% rain</div></div>`).join("") || `<div class="empty">Forecast needs TEMPEST_TOKEN.</div>`;
+  if (d[0]) { $("fcT").innerHTML = `${fmt(d[0].air_temp_high)}°<small>/ ${fmt(d[0].air_temp_low)}°</small>`; $("fcD").textContent = `${d[0].conditions} · ${d[0].precip_probability}% rain`; }
+}
+function renderNws(a) {
+  $("nwsN").innerHTML = a.length ? `${a.length}<small>active</small>` : `0<small>active</small>`;
+  $("nwsD").textContent = a.length ? a.map(x => x.event).join(", ") : "No NWS watches or warnings";
+}
+function freshness() {
+  const s = state, src = {udp: "local network", ws: "Tempest cloud", rest: "Tempest cloud"}[s.source] || "waiting for data";
+  $("fresh").textContent = s.ts ? `Updated ${ago(s.ts)} · via ${src}${s.ifttt ? " · IFTTT on" : ""}` : `Waiting for first observation (${src})`;
+}
+setInterval(freshness, 5000);
+
+/* ---------- live stream ---------- */
+function connect() {
+  const es = new EventSource("/api/stream");
+  es.addEventListener("hello", e => renderState(JSON.parse(e.data)));
+  es.addEventListener("obs", e => { renderState(JSON.parse(e.data)); });
+  es.addEventListener("rapid", e => {
+    const r = JSON.parse(e.data);
+    $("windLive").textContent = `· live ${fmt(r.mph, 1)} mph ${r.card}`;
+    $("liveNow").textContent = `${fmt(r.mph, 1)} mph ${r.card}`;
+    if (document.body.classList.contains("live")) {
+      $("arrow").setAttribute("transform", `rotate(${(r.dir + 180) % 360})`);
+      live.push(r); const cut = Date.now() / 1000 - 1800; live = live.filter(x => x.ts >= cut);
+      chart($("cLive"), live, [{k: "mph", l: "Wind", c: css("--s1")}], {u: " mph", zero: true, span: 10, dec: 1, x0: cut, x1: Date.now() / 1000, gap: 30});
+    }
+  });
+  es.addEventListener("strike", e => { strikes.push(JSON.parse(e.data)); drawAll(); });
+  es.addEventListener("mode", e => { renderState(JSON.parse(e.data)); loadHistory(); loadLists(); });
+  es.addEventListener("event", () => loadLists());
+  es.addEventListener("forecast", e => renderForecast(JSON.parse(e.data)));
+  es.addEventListener("nws", e => renderNws(JSON.parse(e.data)));
+  es.onerror = () => { $("fresh").textContent = "Connection lost, retrying…"; };
+}
+
+/* ---------- controls ---------- */
+$("range").onclick = e => { const b = e.target.closest("button"); if (!b) return;
+  hours = +b.dataset.h; $("range").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); loadHistory(); };
+$("testBtn").onclick = async () => { const r = await fetch("/api/test-ifttt", {method: "POST"}).then(r => r.json()).catch(() => ({ok: false}));
+  $("testMsg").textContent = r.ok ? `Sent “${r.event}”` : (r.error || "Failed"); };
+addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTimeout(drawAll, 150); });
+
+/* refresh cadence follows the mode: every 5 min when calm, every 30 s when live */
+(async function tick() {
+  try { renderState(await j("/api/state")); await Promise.all([loadHistory(), loadLists()]); } catch (e) {}
+  setTimeout(tick, document.body.classList.contains("live") ? 30000 : 300000);
+})();
+connect();
+</script>
+</body>
+</html>

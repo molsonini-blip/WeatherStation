@@ -1,0 +1,18 @@
+# Alternative to Docker: copy the project to /opt/tempest-monitor, create a venv,
+#   python3 -m venv /opt/tempest-monitor/.venv && /opt/tempest-monitor/.venv/bin/pip install -r requirements.txt
+# then: sudo cp tempest-monitor.service /etc/systemd/system/ && sudo systemctl enable --now tempest-monitor
+[Unit]
+Description=Tempest weather monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+WorkingDirectory=/opt/tempest-monitor
+EnvironmentFile=/opt/tempest-monitor/.env
+Environment=DB_PATH=/opt/tempest-monitor/data/tempest.db
+ExecStart=/opt/tempest-monitor/.venv/bin/python app/monitor.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

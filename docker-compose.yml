@@ -1,0 +1,10 @@
+services:
+  tempest-monitor:
+    build: .
+    container_name: tempest-monitor
+    restart: unless-stopped
+    # host networking is required to receive the hub's UDP broadcasts on port 50222
+    network_mode: host
+    env_file: .env
+    volumes:
+      - ./data:/data
