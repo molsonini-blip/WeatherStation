@@ -558,6 +558,8 @@ class Monitor:
                     want, why = False, f"safety limit {CFG.shield_max_hours:g} h reached"
             else:
                 want, why = False, ""
+        if want and sh["on"] and sh["mode"] == "auto" and why and not sh.get("clear_since"):
+            sh["reason"] = why  # keep the shown reason current (e.g. after switching back from manual)
         if want != sh["on"]:
             sh.update(on=want, since=now if want else None, clear_since=None, reason=why if want else "")
             self.send_shield(want, why)
@@ -1297,46 +1299,45 @@ class Monitor:
             self.backup_to_share(bdir)
 
     def backup_to_share(self, bdir):
-        """Mirror data/backups/ to a network share (e.g. the router's ReadySHARE drive)."""
-        import io
-        from smb.SMBConnection import SMBConnection
+        """Mirror data/backups/ to a network share (e.g. the router's ReadySHARE drive). SMB 2 and 3."""
+        import smbclient
         parts = CFG.backup_smb_path.replace("\\", "/").strip("/").split("/")
         host, share, folder = parts[0], parts[1], "/".join(parts[2:])
         status = dict(ts=int(time.time()), target=CFG.backup_smb_path, ok=False)
         try:
             ip = CFG.backup_smb_host or resolve_share_host(host)
-            conn = SMBConnection(CFG.backup_smb_user, CFG.backup_smb_password, "tempest-monitor", host.upper(),
-                                 use_ntlm_v2=True, is_direct_tcp=CFG.backup_smb_port == 445)
-            if not conn.connect(ip, CFG.backup_smb_port, timeout=30):
-                raise RuntimeError(f"could not log in to {host} ({ip})")
-            path = ""
-            for seg in [x for x in folder.split("/") if x]:  # create the folder tree if needed
-                path = f"{path}/{seg}"
-                try:
-                    conn.listPath(share, path)
-                except Exception:
-                    conn.createDirectory(share, path)
-            remote = {f.filename: f.file_size for f in conn.listPath(share, path or "/") if not f.isDirectory}
+            # guest logins have no signing key, so SMB 3's negotiate check has to be skipped for them
+            smbclient.ClientConfig(require_secure_negotiate=bool(CFG.backup_smb_password))
+            smbclient.register_session(ip, username=CFG.backup_smb_user or "guest",
+                                       password=CFG.backup_smb_password or "", port=CFG.backup_smb_port,
+                                       require_signing=False, connection_timeout=30)
+            root = "\\".join(["", "", ip, share] + [x for x in folder.split("/") if x])
+            smbclient.makedirs(root, exist_ok=True, port=CFG.backup_smb_port)
+            remote = {}
+            for name in smbclient.listdir(root, port=CFG.backup_smb_port):
+                st = smbclient.stat(f"{root}\\{name}", port=CFG.backup_smb_port)
+                if not (st.st_mode & 0o040000):
+                    remote[name] = st.st_size
             local = {f.name: f for f in sorted(bdir.glob("tempest-*.db"))}
-            sent = 0
+            sent = removed = 0
             for name, f in local.items():
                 if remote.get(name) != f.stat().st_size:
-                    with open(f, "rb") as fh:
-                        conn.storeFile(share, f"{path}/{name}", fh)
+                    with open(f, "rb") as src, smbclient.open_file(f"{root}\\{name}", mode="wb", port=CFG.backup_smb_port) as dst:
+                        while chunk := src.read(1 << 20):
+                            dst.write(chunk)
                     sent += 1
-            removed = 0
             for name in remote:
                 if name.startswith("tempest-") and name.endswith(".db") and name not in local:
-                    conn.deleteFiles(share, f"{path}/{name}")
+                    smbclient.remove(f"{root}\\{name}", port=CFG.backup_smb_port)
                     removed += 1
-            conn.storeFile(share, f"{path}/README.txt", io.BytesIO(
-                b"Tempest Monitor database backups (SQLite). Open with DB Browser for SQLite, or copy one back to\n"
-                b"the EdgeXpert as data/tempest.db to restore. Managed automatically: daily copies plus one per month.\n"))
-            conn.close()
-            status.update(ok=True, files=len(local), sent=sent, removed=removed)
+            if "README.txt" not in remote:
+                with smbclient.open_file(f"{root}\\README.txt", mode="w", port=CFG.backup_smb_port) as fh:
+                    fh.write("Tempest Monitor database backups (SQLite). Open with DB Browser for SQLite, or copy one back to\n"
+                             "the EdgeXpert as data/tempest.db to restore. Managed automatically: daily copies plus one per month.\n")
+            status.update(ok=True, files=len(local), sent=sent, removed=removed, server=ip)
             log.info("backups mirrored to %s (%d sent, %d removed)", CFG.backup_smb_path, sent, removed)
         except Exception as e:
-            status["error"] = str(e)[:200]
+            status["error"] = str(e).splitlines()[0][:200] if str(e) else type(e).__name__
             log.warning("network backup to %s failed: %s", CFG.backup_smb_path, e)
             self.log_event("backup", f"Network backup failed: {status['error']}")
         self.db.kv_set("backup_status", status)
