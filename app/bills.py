@@ -90,6 +90,19 @@ def parse_date(s):
     return None
 
 
+def valid_period(start, end, today=None):
+    """A real billing period: 5-70 days long, ending no later than ~2 weeks from today."""
+    try:
+        s, e = date.fromisoformat(start), date.fromisoformat(end)
+    except (TypeError, ValueError):
+        return False
+    today = today or date.today()
+    return 5 <= (e - s).days <= 70 and e <= today + timedelta(days=14) and e.year >= 2000
+
+
+PARSER_VERSION = 3  # bump when extract() changes: stored PDFs are re-read on the next start
+
+
 def money(s):
     return float(s.replace(",", "").replace("$", ""))
 
@@ -192,13 +205,16 @@ def extract(text: str) -> dict:
          or re.search(rf"{D}\s+\d{{3,7}}\s+{D}\s+\d{{3,7}}\s+\d", low)          # TXU: date read date read usage
          or re.search(rf"{D}\s+{D}\s+\d{{3,7}}\s+\d{{3,7}}", low)                # Atmos: meter, from, to, reads
          or re.search(rf"(?:service|billing|statement)? ?(?:period|dates?|from)[^\n]{{0,25}}?({DATE_RE}){SEP}({DATE_RE})", low))
-    if not m:
-        for mm in re.finditer(rf"({DATE_RE}){SEP}({DATE_RE})", low):
-            if not re.search(r"contract|term|plan", low[max(0, mm.start() - 60):mm.start()]):
-                m = mm
-                break
-    if m:
-        out["period_start"], out["period_end"] = parse_date(m.group(1)), parse_date(m.group(2))
+    cands = [m] if m else []
+    cands += list(re.finditer(rf"({DATE_RE}){SEP}({DATE_RE})", low))
+    for mm in cands:
+        # a billing period is a few weeks long and already over; contract terms, plan dates etc. are not
+        if re.search(r"contract|term|plan|expir|renew", low[max(0, mm.start() - 60):mm.start()]):
+            continue
+        s, e = parse_date(mm.group(1)), parse_date(mm.group(2))
+        if valid_period(s, e):
+            out["period_start"], out["period_end"] = s, e
+            break
     m = (re.search(rf"amount due\s*on\s*({DATE_RE})", low)
          or re.search(rf"(?:due date|payment due|pay by|due by|due on)[\s\S]{{0,60}}?({DATE_RE})", low))
     if m:
@@ -236,12 +252,38 @@ async def ollama_extract(http, text: str, have: dict) -> dict:
         return {}
 
 
+def apply_hint(fields, name):
+    """The folder a PDF sat in only fills in what the bill itself didn't say (a gas bill filed under TXU stays gas)."""
+    hp, hu = folder_hint(name)
+    if not fields.get("provider"):
+        if hu and fields.get("utility") in (None, hu):
+            fields["utility"] = hu
+            fields["provider"] = hp
+
+
+def clean_fields(fields):
+    for k in ("amount", "usage", "budget_amount", "budget_balance"):
+        if k not in fields:
+            continue
+        try:
+            fields[k] = None if fields[k] is None else float(str(fields[k]).replace(",", "").replace("$", ""))
+        except ValueError:
+            fields[k] = None
+    if fields.get("utility") not in UTILITIES:
+        fields["utility"] = None
+    if fields.get("period_end") and not valid_period(fields.get("period_start") or fields["period_end"], fields["period_end"]) \
+            and fields.get("period_start"):
+        fields["period_start"] = fields["period_end"] = None  # e.g. a model guess that is in the future
+    fields["unit"] = fields.get("unit") or UNITS.get(fields.get("utility") or "", "")
+    return fields
+
+
 class Bills:
     def __init__(self, mon, cfg, resolve_host):
         self.mon, self.db, self.cfg, self.resolve_host = mon, mon.db, cfg, resolve_host
         self.db.c.executescript(SCHEMA)
         cols = {r["name"] for r in self.db.q("PRAGMA table_info(bills)")}
-        for col in ("budget_amount REAL", "budget_balance REAL"):
+        for col in ("budget_amount REAL", "budget_balance REAL", "edited INTEGER"):
             if col.split()[0] not in cols:
                 self.db.x(f"ALTER TABLE bills ADD COLUMN {col}")
         self.dir = Path(cfg.db_path).parent / "bills"
@@ -267,27 +309,14 @@ class Bills:
             path.unlink(missing_ok=True)
             return None
         fields = extract(text)
-        hp, hu = folder_hint(name)
-        if hu and (fields["utility"] is None or fields["utility"] != hu and hp):
-            fields["utility"] = hu
-        if hp and not fields["provider"]:
-            fields["provider"] = hp
+        apply_hint(fields, name)
         missing = [k for k in ("utility", "amount", "usage", "period_end") if fields.get(k) is None
                    and not (k == "usage" and fields.get("utility") == "internet")]
         if missing and text and self.mon.http:
             for k, v in (await ollama_extract(self.mon.http, text, fields)).items():
                 if fields.get(k) is None:
                     fields[k] = v
-        for k in ("amount", "usage", "budget_amount", "budget_balance"):
-            if k not in fields:
-                continue
-            try:
-                fields[k] = None if fields[k] is None else float(str(fields[k]).replace(",", "").replace("$", ""))
-            except ValueError:
-                fields[k] = None
-        if fields.get("utility") not in UTILITIES:
-            fields["utility"] = None
-        fields["unit"] = fields.get("unit") or UNITS.get(fields.get("utility") or "", "")
+        clean_fields(fields)
         ok = all(fields.get(k) is not None for k in ("utility", "amount", "period_end"))
         if fields.get("period_end") and fields.get("amount") is not None:
             dup = self.db.q("SELECT id FROM bills WHERE utility=? AND period_end=? AND ABS(amount-?)<0.01",
@@ -309,6 +338,43 @@ class Bills:
         self.mon.log_event("bills", f"Bill added from {source}: {label} {amt}" + (" · needs review" if status == "review" else ""))
         self.mon.push("bills", dict(id=bid))
         return bid
+
+    async def reparse(self, force=False):
+        """Re-read every stored PDF with the current parser. Bills corrected by hand are left alone."""
+        if not force and (self.db.kv_get("bills_parser", 0) or 0) >= PARSER_VERSION:
+            return 0
+        loop = asyncio.get_running_loop()
+        changed = 0
+        for row in self.db.q("SELECT * FROM bills WHERE file IS NOT NULL AND COALESCE(edited,0)=0"):
+            path = self.dir / row["file"]
+            if not path.is_file():
+                continue
+            try:
+                text = await loop.run_in_executor(None, pdf_text, path.read_bytes())
+            except Exception as e:
+                log.warning("re-read %s failed: %s", row["file"], e)
+                continue
+            if not text:
+                continue
+            f = extract(text)
+            apply_hint(f, re.sub(r"^\d+-", "", row["file"]).replace(" - ", "/", 1))
+            clean_fields(f)
+            keys = ("utility", "provider", "period_start", "period_end", "bill_date", "due_date", "amount", "usage",
+                    "unit", "budget_amount", "budget_balance")
+            new = {k: f.get(k) for k in keys}
+            new["status"] = "ok" if all(new.get(k) is not None for k in ("utility", "amount", "period_end")) else "review"
+            if any(row[k] != v for k, v in new.items()):
+                self.db.x(f"UPDATE bills SET {', '.join(k + '=?' for k in new)} WHERE id=?", (*new.values(), row["id"]))
+                changed += 1
+        # the same bill read twice (now that dates are known): keep the first
+        self.db.x("""DELETE FROM bills WHERE COALESCE(edited,0)=0 AND period_end IS NOT NULL AND id NOT IN
+                     (SELECT MIN(id) FROM bills WHERE period_end IS NOT NULL GROUP BY utility, period_end, ROUND(amount,2))""")
+        self.db.kv_set("bills_parser", PARSER_VERSION)
+        if changed:
+            self.mon.log_event("bills", f"Re-read {changed} bill PDFs with the updated reader")
+            self.mon.push("bills", {})
+        log.info("bills re-read: %d updated", changed)
+        return changed
 
     def scan_inbox(self):
         """Copy new PDFs from the network Bills folder (runs in a thread)."""
@@ -341,6 +407,10 @@ class Bills:
         return new
 
     async def inbox_loop(self):
+        try:
+            await self.reparse()
+        except Exception as e:
+            log.warning("bill re-read failed: %s", e)
         if not self.smb_path:
             return
         await asyncio.sleep(30)
@@ -487,12 +557,15 @@ def register(app_router, web, mon, bills: Bills):
         fields["unit"] = fields["unit"] or UNITS[fields["utility"]]
         if b.get("id"):
             sets = ", ".join(f"{k}=?" for k in fields)
-            bills.db.x(f"UPDATE bills SET {sets}, status='ok' WHERE id=?", (*fields.values(), int(b["id"])))
+            bills.db.x(f"UPDATE bills SET {sets}, status='ok', edited=1 WHERE id=?", (*fields.values(), int(b["id"])))
             bid = int(b["id"])
         else:
             bid = bills.db.x(f"INSERT INTO bills ({', '.join(fields)}, status, source, created) VALUES "
                              f"({', '.join('?' * len(fields))}, 'ok', 'manual', ?)", (*fields.values(), int(time.time())))
         return web.json_response(dict(ok=True, id=bid))
+
+    async def b_reparse(_):
+        return web.json_response(dict(ok=True, updated=await bills.reparse(force=True)))
 
     async def b_delete(req):
         bills.db.x("DELETE FROM bills WHERE id=?", (int(req.match_info["id"]),))
@@ -545,6 +618,7 @@ def register(app_router, web, mon, bills: Bills):
     r.add_post("/api/bills/upload", b_upload)
     r.add_post("/api/bills/save", b_save)
     r.add_post("/api/bills/scan", b_scan)
+    r.add_post("/api/bills/reparse", b_reparse)
     r.add_delete("/api/bills/{id}", b_delete)
     r.add_get("/api/bills/{id}/pdf", b_pdf)
     r.add_get("/api/smt/daily", smt_usage)

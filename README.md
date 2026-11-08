@@ -158,6 +158,9 @@ Electric, water, gas and internet bills, month over month and year over year.
   Electricity Facts Labels are skipped.
 - **PDF bills:** drop them in the **Bills** folder next to the backups on ReadySHARE
   (`\\readyshare\Data\WeatherStation\Bills`, checked every 30 min, or click **Check bills folder**), or use **Upload bill PDF**.
+  The reader skips contract/plan dates and only accepts a billing period of 5–70 days that has already ended. When the
+  reader improves, stored PDFs are re-read automatically on the next start (or click **Re-read PDFs**); bills you
+  corrected by hand are never overwritten.
   The amount, usage, billing period and due date are read from the PDF text (Rhythm, AT&T, City of Round Rock and Atmos
   are recognized by name; others by their units). If a local Ollama model is running on the EdgeXpert (`OLLAMA_URL`,
   default `http://127.0.0.1:11434`, `OLLAMA_MODEL` optional) it fills in anything the patterns miss. Anything still missing

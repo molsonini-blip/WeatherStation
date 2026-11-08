@@ -282,7 +282,7 @@ button.danger{box-shadow:inset 0 0 0 1px var(--critical);color:var(--critical)}
     <div class="grid">
       <div class="hctl" style="grid-column:span 12">
         <input type="file" id="bFile" accept="application/pdf" multiple hidden>
-        <button id="bUpload" class="primary">Upload bill PDF</button><button id="bAddBtn">Add bill by hand</button><button id="bScan">Check bills folder</button>
+        <button id="bUpload" class="primary">Upload bill PDF</button><button id="bAddBtn">Add bill by hand</button><button id="bScan">Check bills folder</button><button id="bReparse" title="Read every stored bill PDF again with the latest reader (bills you corrected by hand are kept)">Re-read PDFs</button>
         <span class="sub" id="bInbox"></span>
       </div>
       <div class="notice card" id="bNote" style="display:none"></div>
@@ -1031,6 +1031,9 @@ $("bFile").onchange = async () => { const fd = new FormData(); [...$("bFile").fi
   if (!$("bFile").files.length) return; $("bUpload").textContent = "Reading…";
   const r = await fetch("/api/bills/upload", {method: "POST", body: fd}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
   $("bUpload").textContent = r.ok ? `Added ${r.ids.length}` : "Upload failed"; setTimeout(() => $("bUpload").textContent = "Upload bill PDF", 3000); $("bFile").value = ""; loadBills(); };
+$("bReparse").onclick = async () => { $("bReparse").textContent = "Reading…";
+  const r = await fetch("/api/bills/reparse", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false}));
+  $("bReparse").textContent = r.ok ? `Updated ${r.updated}` : "Failed"; setTimeout(() => $("bReparse").textContent = "Re-read PDFs", 3000); loadBills(); };
 $("bScan").onclick = async () => { $("bScan").textContent = "Checking…";
   const r = await fetch("/api/bills/scan", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
   $("bScan").textContent = r.ok ? (r.added ? `Added ${r.added}` : "No new bills") : "Couldn't reach folder"; if (!r.ok) $("bInbox").textContent = "⚠ " + r.error;
