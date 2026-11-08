@@ -95,6 +95,7 @@ class Config:
     yolink_secret: str | None = env("YOLINK_SECRET")
     yolink_device: str | None = env("YOLINK_DEVICE")  # plug name as shown in the YoLink app, or its deviceId
     yolink_host: str = env("YOLINK_HOST", "https://api.yosmart.com")
+    yolink_poll_min: float = env("YOLINK_POLL_MIN", 5, float)  # temperature/humidity sensor polling
     # hail camera (Reolink + printed size markers on a dark plate)
     hailcam_host: str | None = env("HAILCAM_HOST")
     hailcam_user: str = env("HAILCAM_USER", "admin")
@@ -205,6 +206,8 @@ CREATE TABLE IF NOT EXISTS storms (id INTEGER PRIMARY KEY AUTOINCREMENT, start_t
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS hail_frames (ts INTEGER PRIMARY KEY, visible INTEGER, new INTEGER, max_mm REAL,
   sizes TEXT, image TEXT);
+CREATE TABLE IF NOT EXISTS yl_th (ts INTEGER, device TEXT, temp_c REAL, humidity REAL, battery INTEGER,
+  PRIMARY KEY (device, ts));
 CREATE TABLE IF NOT EXISTS hail_events (id INTEGER PRIMARY KEY AUTOINCREMENT, start_ts INTEGER, end_ts INTEGER,
   summary TEXT, image TEXT);
 """
@@ -263,6 +266,8 @@ class Monitor:
     offline_alerted: bool = False
     _mode_changed: asyncio.Event = field(default_factory=asyncio.Event)
     yolink: dict = field(default_factory=dict)
+    yl_state: dict = field(default_factory=dict)
+    yl_error: str | None = None
     cam: dict = field(default_factory=lambda: dict(enabled=False, active=False, last_ts=None, error=None,
                                                     markers=0, event_id=None, last_new_ts=None, alerted_mm=0))
     shield: dict = field(default_factory=lambda: dict(on=False, mode="auto", since=None, clear_since=None,
@@ -572,7 +577,7 @@ class Monitor:
     async def yolink_plug(self):
         yl = self.yolink
         if not yl.get("device"):
-            devs = (await self.yolink_call({"method": "Home.getDeviceList"})).get("devices", [])
+            devs = await self.yolink_devices(refresh=True)
             want = (CFG.yolink_device or "").strip().lower()
             plugs = [d for d in devs if "Outlet" in d.get("type", "")]
             match = [d for d in plugs if want in (d["name"].lower(), d["deviceId"].lower())] if want else plugs[:1]
@@ -860,6 +865,67 @@ class Monitor:
                        f"gust {s['max_gust_mph']} mph, {s['strikes']} strikes", fc, cooldown=False)
 
     # --------------------------------------------------------------- hail camera
+    # --------------------------------------------------------------- YoLink temperature / humidity sensors
+    TH_TYPES = ("THSensor",)
+
+    async def yolink_devices(self, refresh=False):
+        yl = self.yolink
+        if refresh or not yl.get("devices") or time.time() - yl.get("devices_ts", 0) > 6 * 3600:
+            devs = (await self.yolink_call({"method": "Home.getDeviceList"})).get("devices", [])
+            yl.update(devices=devs, devices_ts=time.time())
+            self.db.kv_set("yl_devices", [{k: d.get(k) for k in ("deviceId", "name", "type", "modelName")} for d in devs])
+        return yl["devices"]
+
+    async def yolink_th_loop(self):
+        """Poll every YoLink temperature/humidity sensor and keep a history."""
+        if not (CFG.yolink_uaid and CFG.yolink_secret):
+            return
+        await asyncio.sleep(5)
+        while True:
+            try:
+                devs = [d for d in await self.yolink_devices() if d.get("type") in self.TH_TYPES]
+                for d in devs:
+                    data = await self.yolink_call({"method": f"{d['type']}.getState", "targetDevice": d["deviceId"],
+                                                   "token": d["token"]})
+                    st = data.get("state") or {}
+                    ts = self.parse_report_ts(data.get("reportAt"))
+                    if st.get("temperature") is None:
+                        continue
+                    self.db.x("INSERT OR IGNORE INTO yl_th VALUES (?,?,?,?,?)",
+                              (ts, d["deviceId"], st.get("temperature"), st.get("humidity"),
+                               int(st["battery"]) if str(st.get("battery", "")).isdigit() else None))
+                    self.yl_state[d["deviceId"]] = dict(
+                        id=d["deviceId"], name=d["name"], model=d.get("modelName"), online=data.get("online"),
+                        ts=ts, temp_f=c_to_f(st.get("temperature")), humidity=st.get("humidity"),
+                        battery=int(st["battery"]) if str(st.get("battery", "")).isdigit() else None,
+                        alarm=[k for k, v in (st.get("alarm") or {}).items() if v is True],
+                        temp_limit_f=[c_to_f((st.get("tempLimit") or {}).get(k)) for k in ("min", "max")],
+                        humidity_limit=[(st.get("humidityLimit") or {}).get(k) for k in ("min", "max")])
+                    await asyncio.sleep(1)
+                self.yl_error = None
+                self.push("yolink", self.yolink_snapshot())
+            except Exception as e:
+                self.yl_error = str(e)[:200]
+                log.warning("YoLink sensors: %s", e)
+            await asyncio.sleep(CFG.yolink_poll_min * 60)
+
+    @staticmethod
+    def parse_report_ts(v):
+        try:
+            return int(datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp())
+        except Exception:
+            return int(time.time())
+
+    def yolink_snapshot(self):
+        since = self.since(24 * 3600)
+        out = []
+        for dev_id, s in sorted(self.yl_state.items(), key=lambda kv: kv[1]["name"].lower()):
+            r = self.db.q("SELECT MIN(temp_c) lo, MAX(temp_c) hi, MIN(humidity) hlo, MAX(humidity) hhi FROM yl_th "
+                          "WHERE device=? AND ts>=?", (dev_id, since))[0]
+            out.append(dict(s, hi24_f=c_to_f(r["hi"]), lo24_f=c_to_f(r["lo"]), hum_lo24=r["hlo"], hum_hi24=r["hhi"]))
+        return dict(enabled=bool(CFG.yolink_uaid and CFG.yolink_secret), error=self.yl_error, sensors=out,
+                    outdoor=dict(temp_f=c_to_f((self.latest or {}).get("temp_c")), humidity=(self.latest or {}).get("rh")))
+
     def hailcam_setup(self):
         if not (CFG.hailcam_host or CFG.hailcam_rtsp):
             return
@@ -1274,6 +1340,31 @@ def build_app(mon: Monitor):
                                       stones=[round(x["d_mm"], 1) for x in res.stones]))
 
     r.add_get("/api/hailcam", hailcam_status)
+
+    async def yl_sensors(_):
+        return web.json_response(mon.yolink_snapshot())
+
+    async def yl_history(req):
+        hours = min(float(req.query.get("hours", 24)), 24 * 31)
+        since = mon.since(hours * 3600)
+        rows = mon.db.q("SELECT ts, device, temp_c, humidity FROM yl_th WHERE ts>=? ORDER BY ts", (since,))
+        series = {}
+        for x in rows:
+            series.setdefault(x["device"], []).append(dict(ts=x["ts"], temp_f=c_to_f(x["temp_c"]), humidity=x["humidity"]))
+        outdoor = mon.db.q("SELECT ts, temp_c, rh FROM obs WHERE ts>=? ORDER BY ts", (since,))
+        outdoor = bucket([dict(ts=o["ts"], temp_f=c_to_f(o["temp_c"]), humidity=o["rh"]) for o in outdoor], 600)
+        return web.json_response(dict(series={k: bucket(v, 600) for k, v in series.items()}, outdoor=outdoor))
+
+    async def yl_refresh(_):
+        try:
+            await mon.yolink_devices(refresh=True)
+        except Exception as e:
+            return web.json_response(dict(ok=False, error=str(e)[:200]), status=502)
+        return web.json_response(dict(ok=True, devices=mon.db.kv_get("yl_devices", [])))
+
+    r.add_get("/api/yolink/sensors", yl_sensors)
+    r.add_get("/api/yolink/history", yl_history)
+    r.add_post("/api/yolink/refresh", yl_refresh)
     r.add_get("/api/hailcam/image", hailcam_image)
     r.add_post("/api/hailcam/test", hailcam_test)
     r.add_static("/static", STATIC)
@@ -1316,7 +1407,8 @@ async def main():
     await web.TCPSite(runner, "0.0.0.0", CFG.http_port).start()
     log.info("dashboard on http://0.0.0.0:%d", CFG.http_port)
     mon.hailcam_setup()
-    await asyncio.gather(mon.udp_loop(), mon.ws_loop(), mon.scheduler(), mon.daily_loop(), mon.hailcam_loop())
+    await asyncio.gather(mon.udp_loop(), mon.ws_loop(), mon.scheduler(), mon.daily_loop(), mon.hailcam_loop(),
+                         mon.yolink_th_loop())
 
 
 if __name__ == "__main__":

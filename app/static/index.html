@@ -10,7 +10,7 @@
   --bg:#f4f3ef;--surface:#fcfcfb;--surface-2:#f0efea;--ink:#0b0b0b;--ink-2:#52514e;--ink-3:#7a7974;
   --grid:#e1e0d9;--axis:#c3c2b7;--ring:rgba(11,11,11,.10);
   --s1:#2a78d6;--s2:#eb6834;--s1-soft:rgba(42,120,214,.14);
-  --sun:#f2a900;--moon:#b9b5a8;--cloud:#cdd2da;--cloud-dk:#8e95a0;--rain:#2a78d6;--snow:#9fc3ee;--bolt:#f2a900;--cold:#4f9be8;--warm:#eb6834;--b1:#b7d3f6;--b2:#6da7ec;--b3:#2a78d6;--b4:#1c5cab;--b5:#0d366b;
+  --sun:#f2a900;--moon:#b9b5a8;--cloud:#cdd2da;--cloud-dk:#8e95a0;--rain:#2a78d6;--snow:#9fc3ee;--bolt:#f2a900;--cold:#4f9be8;--warm:#eb6834;--b1:#b7d3f6;--b2:#6da7ec;--b3:#2a78d6;--b4:#1c5cab;--b5:#0d366b;--c1:#2a78d6;--c2:#eb6834;--c3:#1baf7a;--c4:#eda100;--c5:#e87ba4;--c6:#008300;--c7:#6250d6;--c8:#e34948;
   --good:#0ca30c;--warning:#fab219;--serious:#ec835a;--critical:#d03b3b;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
@@ -18,14 +18,14 @@
   --bg:#111110;--surface:#1a1a19;--surface-2:#222220;--ink:#f0efec;--ink-2:#c3c2b7;--ink-3:#8f8e88;
   --grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);
   --s1:#3987e5;--s2:#d95926;--s1-soft:rgba(57,135,229,.18);
-  --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;--b1:#cde2fb;--b2:#86b6ef;--b3:#3987e5;--b4:#256abf;--b5:#184f95;
+  --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;--b1:#cde2fb;--b2:#86b6ef;--b3:#3987e5;--b4:#256abf;--b5:#184f95;--c1:#3987e5;--c2:#d95926;--c3:#199e70;--c4:#c98500;--c5:#d55181;--c6:#008300;--c7:#9085e9;--c8:#e66767;
 }}
 :root[data-theme="dark"]{
   color-scheme:dark;
   --bg:#111110;--surface:#1a1a19;--surface-2:#222220;--ink:#f0efec;--ink-2:#c3c2b7;--ink-3:#8f8e88;
   --grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);
   --s1:#3987e5;--s2:#d95926;--s1-soft:rgba(57,135,229,.18);
-  --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;--b1:#cde2fb;--b2:#86b6ef;--b3:#3987e5;--b4:#256abf;--b5:#184f95;
+  --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;--b1:#cde2fb;--b2:#86b6ef;--b3:#3987e5;--b4:#256abf;--b5:#184f95;--c1:#3987e5;--c2:#d95926;--c3:#199e70;--c4:#c98500;--c5:#d55181;--c6:#008300;--c7:#9085e9;--c8:#e66767;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
@@ -107,6 +107,20 @@ td.n,th.n{text-align:right}
 .hist div{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;color:var(--ink-3)}
 .hist i{display:block;width:100%;background:var(--s1);border-radius:3px 3px 0 0;min-height:1px}
 @media (max-width:900px){.hcam{grid-template-columns:1fr}}
+.tabs{display:inline-flex;gap:4px;padding:3px;border-radius:10px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--ring)}
+.tabs a{padding:6px 12px;border-radius:8px;color:var(--ink-2);text-decoration:none;font-weight:600}
+.tabs a[aria-current="page"]{background:var(--ink);color:var(--surface)}
+main[hidden]{display:none}
+.ylcards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));grid-column:span 12}
+.ylc .nm{display:flex;align-items:center;gap:8px;font-weight:600;min-width:0}.ylc .nm span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ylc .sw{width:10px;height:10px;border-radius:3px;flex:none}
+.ylc .tv{font-size:34px;font-weight:400;letter-spacing:-.02em;margin:6px 0 2px}.ylc .tv small{font-size:16px;color:var(--ink-2)}
+.ylc .meta{display:flex;flex-wrap:wrap;gap:4px 12px;color:var(--ink-2);font-size:12.5px}
+.ylc.out{background:var(--surface-2)}
+.bat{display:inline-flex;gap:1.5px;align-items:center;vertical-align:-1px}.bat i{width:3px;height:9px;border-radius:1px;background:var(--grid)}.bat i.f{background:var(--ink-2)}.bat.low i.f{background:var(--critical)}
+.pill{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;padding:1px 7px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--ring)}
+.pill.warn::before{content:"▲";color:var(--warning)}.pill.crit::before{content:"●";color:var(--critical)}
+.notice{grid-column:span 12;color:var(--ink-2)}
 .live-only{display:none}body.live .live-only{display:block}
 @media (max-width:900px){.hero,.tiles,.chart,.half{grid-column:span 12}.tiles{grid-template-columns:repeat(2,1fr)}.fc{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:520px){.big{font-size:52px}.tiles{grid-template-columns:1fr 1fr}.fc{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -119,6 +133,7 @@ td.n,th.n{text-align:right}
       <h1 id="station">Tempest Monitor</h1>
       <div class="sub" id="fresh">Connecting…</div>
     </div>
+    <nav class="tabs" aria-label="Pages"><a href="#weather" data-pg="weather">Weather</a><a href="#yolink" data-pg="yolink">YoLink</a></nav>
     <div class="spacer"></div>
     <span class="badge" id="badge" role="status"><span class="dot"></span><span id="modeLabel">Normal</span></span>
     <div class="seg" id="range" aria-label="History range">
@@ -131,6 +146,7 @@ td.n,th.n{text-align:right}
     </div>
   </header>
 
+  <main id="pgWeather">
   <div class="banner" id="banner"></div>
 
   <div class="grid">
@@ -200,6 +216,18 @@ td.n,th.n{text-align:right}
 
     <section class="card" style="grid-column:span 12"><h2>Daily records</h2><div style="overflow:auto"><table id="daily"></table></div></section>
   </div>
+  </main>
+
+  <main id="pgYolink" hidden>
+    <div class="grid">
+      <div class="notice card" id="ylNotice" style="display:none"></div>
+      <div class="ylcards" id="ylCards"></div>
+      <section class="card chart wide"><div class="head"><h2>Temperature</h2><span class="legend" id="ylLegT"></span></div><svg class="viz" id="ylT" style="height:220px"></svg></section>
+      <section class="card chart wide"><div class="head"><h2>Humidity</h2><span class="legend" id="ylLegH"></span></div><svg class="viz" id="ylH" style="height:220px"></svg></section>
+      <section class="card" style="grid-column:span 12"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h2 style="margin:0">Sensors</h2><span style="flex:1"></span><button id="ylRefresh">Find new sensors</button></div>
+        <div style="overflow:auto"><table id="ylTable"></table></div></section>
+    </div>
+  </main>
 </div>
 <div class="tip" id="tip"></div>
 
@@ -519,6 +547,7 @@ function connect() {
   es.addEventListener("strike", e => { strikes.push(JSON.parse(e.data)); drawAll(); });
   es.addEventListener("mode", e => { renderState(JSON.parse(e.data)); loadHistory(); loadLists(); });
   es.addEventListener("event", () => loadLists());
+  es.addEventListener("yolink", e => { ylSnap = JSON.parse(e.data); if (page === "yolink") { renderYolinkCards(); loadYolink(); } });
   es.addEventListener("hailcam", e => { state.hailcam = JSON.parse(e.data); renderHailcam(state.hailcam); });
   es.addEventListener("shield", e => { renderShield(JSON.parse(e.data)); loadLists(); });
   es.addEventListener("hail", () => { $("rainD").textContent = "⚠ Hail detected"; loadLists(); });
@@ -529,17 +558,113 @@ function connect() {
 
 /* ---------- controls ---------- */
 $("range").onclick = e => { const b = e.target.closest("button"); if (!b) return;
-  hours = +b.dataset.h; $("range").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); loadHistory(); };
+  hours = +b.dataset.h; $("range").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); loadHistory(); if (page === "yolink") loadYolink(); };
 $("testBtn").onclick = async () => { const r = await fetch("/api/test-ifttt", {method: "POST"}).then(r => r.json()).catch(() => ({ok: false}));
   $("testMsg").textContent = r.ok ? `Sent “${r.event}”` : (r.error || "Failed"); };
-addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTimeout(drawAll, 150); });
+addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTimeout(() => { drawAll(); if (page === "yolink") drawYolink(); }, 150); });
 
 /* refresh cadence follows the mode: every 5 min when calm, every 30 s when live */
 (async function tick() {
   try { renderState(await j("/api/state")); await Promise.all([loadHistory(), loadLists()]); } catch (e) {}
   setTimeout(tick, document.body.classList.contains("live") ? 30000 : 300000);
 })();
+/* ---------- pages: Weather / YoLink ---------- */
+let page = "weather", ylSnap = null, ylHist = null;
+function showPage() {
+  page = location.hash === "#yolink" ? "yolink" : "weather";
+  $("pgWeather").hidden = page !== "weather"; $("pgYolink").hidden = page !== "yolink";
+  document.querySelectorAll(".tabs a").forEach(a => a.dataset.pg === page ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
+  $("badge").style.display = page === "weather" ? "" : "none";
+  if (page === "yolink") loadYolink(); else drawAll();
+}
+addEventListener("hashchange", showPage);
+
+/* multi-series line chart: each series has its own timestamps (sensors report at different times) */
+function mchart(svg, list, opt = {}) {
+  const W = svg.clientWidth || 600, H = svg.clientHeight || 220, L = 40, R = 8, T = 8, B = 22;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  const all = list.flatMap(s => s.rows.map(r => r.v)).filter(v => v != null);
+  if (!all.length) { svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle">No data yet</text>`; return; }
+  const x0 = opt.x0, x1 = opt.x1; let lo = Math.min(...all), hi = Math.max(...all);
+  if (hi - lo < (opt.span || 5)) { const m = (hi + lo) / 2; lo = m - (opt.span || 5) / 2; hi = m + (opt.span || 5) / 2; }
+  const raw = (hi - lo) / 4, mag = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(k => k >= raw);
+  lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
+  const X = t => L + (t - x0) / Math.max(1, x1 - x0) * (W - L - R), Y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
+  let g = "";
+  for (let v = lo; v <= hi + step / 2; v += step) { const y = Y(v);
+    g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${fmt(v, step < 1 ? 1 : 0)}</text>`; }
+  const span = x1 - x0, nx = Math.max(2, Math.floor((W - L) / 110));
+  for (let i = 0; i <= nx; i++) { const t = x0 + span * i / nx;
+    const lab = span > 2 * 86400 ? new Date(t * 1000).toLocaleDateString([], {weekday: "short", hour: "numeric"}) : new Date(t * 1000).toLocaleTimeString([], {hour: "numeric"});
+    g += `<text x="${X(t)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === nx ? "end" : "middle"}">${lab}</text>`; }
+  g += `<line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="var(--axis)"/>`;
+  list.forEach(s => { let d = "", prev = null;
+    s.rows.forEach(r => { if (r.v == null) return; const brk = prev == null || r.ts - prev > (opt.gap || 3 * 3600);
+      d += `${brk ? "M" : "L"}${X(r.ts).toFixed(1)},${Y(r.v).toFixed(1)}`; prev = r.ts; });
+    g += `<path d="${d}" fill="none" stroke="${s.c}" stroke-width="${s.w || 2}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""} stroke-linejoin="round" stroke-linecap="round"/>`; });
+  g += `<line class="xh" y1="${T}" y2="${H - B}" stroke="var(--ink-3)" stroke-dasharray="3 3" style="display:none"/>`;
+  list.forEach((s, i) => g += `<circle class="hp hp${i}" r="4" fill="${s.c}" stroke="var(--surface)" stroke-width="2" style="display:none"/>`);
+  g += `<rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/>`;
+  svg.innerHTML = g;
+  const xh = svg.querySelector(".xh");
+  svg.onmousemove = e => {
+    const b = svg.getBoundingClientRect(), t = x0 + ((e.clientX - b.left) * W / b.width - L) / (W - L - R) * (x1 - x0);
+    xh.setAttribute("x1", X(t)); xh.setAttribute("x2", X(t)); xh.style.display = "";
+    const lines = [];
+    list.forEach((s, i) => { const c = svg.querySelector(".hp" + i); let best = null;
+      for (const r of s.rows) if (r.v != null && (!best || Math.abs(r.ts - t) < Math.abs(best.ts - t))) best = r;
+      if (!best || Math.abs(best.ts - t) > (opt.gap || 3 * 3600)) { c.style.display = "none"; return; }
+      c.setAttribute("cx", X(best.ts)); c.setAttribute("cy", Y(best.v)); c.style.display = "";
+      lines.push(`<span style="color:${s.c}">■</span> ${escapeHtml(s.l)}: <b>${fmt(best.v, opt.dec ?? 1)}${opt.u}</b>`); });
+    tip.innerHTML = `${dtstr(t)}<br>` + lines.join("<br>");
+    tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY - 12 - tip.offsetHeight) + "px";
+  };
+  svg.onmouseleave = () => { xh.style.display = "none"; svg.querySelectorAll(".hp").forEach(c => c.style.display = "none"); tip.style.display = "none"; };
+}
+
+const ylColor = i => i < 8 ? `var(--c${i + 1})` : "var(--ink-3)";
+const battery = b => b == null ? "" : `<span class="bat${b <= 1 ? " low" : ""}" title="Battery ${b}/4">${[1, 2, 3, 4].map(k => `<i class="${k <= b ? "f" : ""}"></i>`).join("")}</span>`;
+const ALARM = {lowBattery: ["crit", "Low battery"], lowTemp: ["warn", "Too cold"], highTemp: ["warn", "Too hot"], lowHumidity: ["warn", "Too dry"], highHumidity: ["warn", "Too humid"]};
+function renderYolinkCards() {
+  const s = ylSnap; if (!s) return;
+  const n = $("ylNotice");
+  if (!s.enabled) { n.style.display = ""; n.textContent = "YoLink isn't set up: add YOLINK_UAID and YOLINK_SECRET to the settings file."; }
+  else if (s.error) { n.style.display = ""; n.innerHTML = `<b>⚠ YoLink problem:</b> ${escapeHtml(s.error)}`; }
+  else if (!s.sensors.length) { n.style.display = ""; n.textContent = "Waiting for the first readings from your YoLink temperature/humidity sensors…"; }
+  else n.style.display = "none";
+  const o = s.outdoor;
+  let h = `<div class="card ylc out"><div class="nm"><span class="sw" style="background:var(--ink-3)"></span><span>Outdoor (Tempest)</span></div>
+    <div class="tv">${fmt(o.temp_f, 1)}<small>°F</small></div><div class="meta"><span>${fmt(o.humidity)}% humidity</span><span>live</span></div></div>`;
+  h += s.sensors.map((x, i) => `<div class="card ylc"><div class="nm"><span class="sw" style="background:${ylColor(i)}"></span><span title="${escapeHtml(x.name)}">${escapeHtml(x.name)}</span>
+      ${x.online === false ? `<span class="pill crit">Offline</span>` : ""}</div>
+    <div class="tv">${fmt(x.temp_f, 1)}<small>°F</small></div>
+    <div class="meta"><span>${fmt(x.humidity)}% humidity</span><span>24h ${fmt(x.lo24_f)}–${fmt(x.hi24_f)}°</span><span>${battery(x.battery)}</span><span>${x.ts ? ago(x.ts) : ""}</span></div>
+    ${(x.alarm || []).filter(a => ALARM[a]).map(a => `<span class="pill ${ALARM[a][0]}" style="margin-top:6px">${ALARM[a][1]}</span>`).join(" ")}</div>`).join("");
+  $("ylCards").innerHTML = h;
+  $("ylTable").innerHTML = `<tr><th>Sensor</th><th>Model</th><th class="n">Temp</th><th class="n">Humidity</th><th class="n">24h low / high</th><th class="n">Battery</th><th class="n">Last report</th></tr>` +
+    s.sensors.map(x => `<tr><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.model || "")}</td><td class="n">${fmt(x.temp_f, 1)}°F</td><td class="n">${fmt(x.humidity)}%</td><td class="n">${fmt(x.lo24_f, 1)}° / ${fmt(x.hi24_f, 1)}°</td><td class="n">${x.battery ?? "--"}/4</td><td class="n">${x.ts ? dtstr(x.ts) : "--"}</td></tr>`).join("");
+}
+function drawYolink() {
+  if (!ylSnap || !ylHist) return;
+  const now = Date.now() / 1000, x0 = now - hours * 3600;
+  const series = k => [{l: "Outdoor", c: "var(--ink-3)", dash: "4 3", w: 1.5, rows: ylHist.outdoor.map(r => ({ts: r.ts, v: r[k]}))}]
+    .concat(ylSnap.sensors.map((x, i) => ({l: x.name, c: ylColor(i), rows: (ylHist.series[x.id] || []).map(r => ({ts: r.ts, v: r[k]}))})));
+  const leg = `<span><i style="background:var(--ink-3)"></i>Outdoor</span>` + ylSnap.sensors.map((x, i) => `<span><i style="background:${ylColor(i)}"></i>${escapeHtml(x.name)}</span>`).join("");
+  $("ylLegT").innerHTML = $("ylLegH").innerHTML = leg;
+  mchart($("ylT"), series("temp_f"), {u: "°F", x0, x1: now, span: 10});
+  mchart($("ylH"), series("humidity"), {u: "%", x0, x1: now, span: 20, dec: 0});
+}
+async function loadYolink() {
+  try { [ylSnap, ylHist] = await Promise.all([j("/api/yolink/sensors"), j(`/api/yolink/history?hours=${hours}`)]); } catch (e) { return; }
+  renderYolinkCards(); drawYolink();
+}
+$("ylRefresh").onclick = async () => { $("ylRefresh").textContent = "Searching…";
+  const r = await fetch("/api/yolink/refresh", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
+  $("ylRefresh").textContent = r.ok ? `Found ${r.devices.filter(d => d.type === "THSensor").length} sensors` : "Failed"; setTimeout(loadYolink, 2000); };
+setInterval(() => { if (page === "yolink") loadYolink(); }, 5 * 60000);
+
 setTheme(savedTheme);
+showPage();
 connect();
 </script>
 </body>
