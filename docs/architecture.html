@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+</head>
+<body style="margin:0">
+<title>WeatherStation Architecture</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one wide system figure (internet on top, home network in the middle, viewers/backup/deploy below), then the protocol table */
+:root{
+  --bg:#f5f6f4; --panel:#ffffff; --ink:#15191c; --ink-2:#4c565d; --ink-3:#7c868d;
+  --line:#2b3236; --zone:#e8ece9; --zone-edge:#c3cbc6; --box:#ffffff;
+  --live:#1f6fd1; --cloud:#5c6a73; --planned:#9aa3a8; --accent-soft:rgba(31,111,209,.08);
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#111416; --panel:#181c1f; --ink:#e8ecee; --ink-2:#a9b3b8; --ink-3:#7d878d;
+  --line:#c9d1d5; --zone:#1c2124; --zone-edge:#323a3f; --box:#14181a;
+  --live:#5aa2f0; --cloud:#9aa8b0; --planned:#6c767c; --accent-soft:rgba(90,162,240,.12); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#111416; --panel:#181c1f; --ink:#e8ecee; --ink-2:#a9b3b8; --ink-3:#7d878d;
+  --line:#c9d1d5; --zone:#1c2124; --zone-edge:#323a3f; --box:#14181a;
+  --live:#5aa2f0; --cloud:#9aa8b0; --planned:#6c767c; --accent-soft:rgba(90,162,240,.12); color-scheme:dark}
+body{background:var(--bg);color:var(--ink);font:15px/1.55 var(--sans);-webkit-font-smoothing:antialiased}
+.wrap{max-width:1220px;margin:0 auto;padding-block:28px 56px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;flex-direction:column;gap:28px}
+header h1{font-size:28px;font-weight:600;letter-spacing:-.01em;margin:0 0 6px;text-wrap:balance}
+header p{margin:0;color:var(--ink-2);max-width:72ch}
+.key{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:13px;color:var(--ink-2)}
+.key span{display:inline-flex;align-items:center;gap:8px}
+.key svg{flex:none}
+figure{margin:0;background:var(--panel);border-radius:14px;box-shadow:0 0 0 1px var(--zone-edge);padding:16px}
+.scroll{overflow-x:auto}
+figure svg{display:block;width:100%;min-width:960px;height:auto;color:var(--line)}
+figcaption{font-size:13px;color:var(--ink-2);margin-top:10px;max-width:90ch}
+.diagram text{font-family:var(--sans);fill:var(--ink)}
+.diagram .t{font-size:13px;font-weight:600}
+.diagram .s{font-size:11px;fill:var(--ink-2)}
+.diagram .p{font-family:var(--mono);font-size:10.5px;fill:var(--ink-2)}
+.diagram .pl{font-family:var(--mono);font-size:10.5px;fill:var(--live);font-weight:500}
+.diagram .zl{font-size:11px;font-weight:600;letter-spacing:.08em;fill:var(--ink-3)}
+h2{font-size:13px;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--ink-2);margin:0 0 10px}
+.tbl{overflow-x:auto;background:var(--panel);border-radius:14px;box-shadow:0 0 0 1px var(--zone-edge)}
+table{border-collapse:collapse;width:100%;min-width:860px;font-size:13.5px}
+th{text-align:left;font-weight:600;color:var(--ink-2);padding:10px 14px;border-bottom:1px solid var(--zone-edge);white-space:nowrap}
+td{padding:10px 14px;border-bottom:1px solid var(--zone-edge);vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.n{font-family:var(--mono);color:var(--ink-3);width:2.5em}
+td code{font-family:var(--mono);font-size:12.5px;background:var(--accent-soft);padding:1px 5px;border-radius:4px;white-space:nowrap}
+td.planned{color:var(--ink-3)}
+.tag{font-size:11px;font-weight:600;color:var(--ink-3);border:1px solid var(--zone-edge);border-radius:999px;padding:0 7px;margin-left:6px;white-space:nowrap}
+.notes{display:grid;gap:16px;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}
+.notes div{background:var(--panel);border-radius:12px;box-shadow:0 0 0 1px var(--zone-edge);padding:14px 16px;min-width:0}
+.notes h3{font-size:14px;margin:0 0 4px}
+.notes p{margin:0;color:var(--ink-2);font-size:13.5px}
+</style>
+
+<div class="wrap">
+  <header>
+    <h1>WeatherStation Architecture</h1>
+    <p>How the Tempest monitor on the EdgeXpert gathers data from your Tempest station, the National Weather Service and YoLink, and how it reaches the dashboard, alerts, backups and a Claude artifact.</p>
+  </header>
+
+  <div class="key" aria-label="Line styles">
+    <span><svg width="34" height="10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" stroke="var(--live)" stroke-width="2.5"/></svg>Live data path</span>
+    <span><svg width="34" height="10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" stroke="var(--cloud)" stroke-width="1.6"/></svg>Internet / cloud call</span>
+    <span><svg width="34" height="10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" stroke="var(--line)" stroke-width="1.6" stroke-dasharray="2 3"/></svg>Radio link</span>
+    <span><svg width="34" height="10" aria-hidden="true"><line x1="0" y1="5" x2="34" y2="5" stroke="var(--planned)" stroke-width="1.6" stroke-dasharray="6 4"/></svg>Planned, not built yet</span>
+  </div>
+
+  <figure>
+    <div class="scroll">
+    <svg class="diagram" viewBox="0 0 1200 760" role="img" aria-label="The EdgeXpert runs the monitor in Docker. It hears the Tempest hub directly over UDP on the home network, calls Tempest, the National Weather Service and YoLink over HTTPS, stores everything in SQLite and serves the dashboard over HTTP on port 8088 to browsers through Tailscale. It sends alerts to IFTTT and backs up to the ReadySHARE drive over SMB.">
+      <defs>
+        <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"/></marker>
+        <marker id="al" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--live)"/></marker>
+        <marker id="ac" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--cloud)"/></marker>
+        <marker id="ap" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="var(--planned)"/></marker>
+      </defs>
+
+      <!-- zones -->
+      <rect x="10" y="14" width="1180" height="118" rx="12" fill="var(--zone)" stroke="var(--zone-edge)"/>
+      <text class="zl" x="24" y="34">INTERNET</text>
+      <rect x="10" y="152" width="1180" height="430" rx="12" fill="none" stroke="var(--zone-edge)" stroke-dasharray="6 5"/>
+      <text class="zl" x="24" y="172">HOME NETWORK · LAN + TAILSCALE</text>
+      <rect x="10" y="616" width="1180" height="132" rx="12" fill="var(--zone)" stroke="var(--zone-edge)"/>
+      <text class="zl" x="1176" y="636" text-anchor="end">VIEWERS · BACKUP · DEPLOY</text>
+
+      <!-- internet row -->
+      <g>
+        <rect x="30" y="50" width="200" height="64" rx="8" fill="var(--box)" stroke="var(--cloud)"/>
+        <text class="t" x="130" y="76" text-anchor="middle">Tempest cloud</text>
+        <text class="s" x="130" y="94" text-anchor="middle">swd / ws.weatherflow.com</text>
+      </g>
+      <g>
+        <rect x="480" y="50" width="170" height="64" rx="8" fill="var(--box)" stroke="var(--cloud)"/>
+        <text class="t" x="565" y="76" text-anchor="middle">National Weather Service</text>
+        <text class="s" x="565" y="94" text-anchor="middle">api.weather.gov</text>
+      </g>
+      <g>
+        <rect x="690" y="50" width="160" height="64" rx="8" fill="var(--box)" stroke="var(--cloud)"/>
+        <text class="t" x="770" y="76" text-anchor="middle">IFTTT</text>
+        <text class="s" x="770" y="94" text-anchor="middle">push to your phone</text>
+      </g>
+      <g>
+        <rect x="970" y="50" width="200" height="64" rx="8" fill="var(--box)" stroke="var(--cloud)"/>
+        <text class="t" x="1070" y="76" text-anchor="middle">YoLink cloud</text>
+        <text class="s" x="1070" y="94" text-anchor="middle">api.yosmart.com</text>
+      </g>
+
+      <!-- left: Tempest devices -->
+      <g>
+        <rect x="30" y="200" width="200" height="60" rx="8" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="130" y="225" text-anchor="middle">Tempest hub</text>
+        <text class="s" x="130" y="243" text-anchor="middle">ST-00200731 · Wi-Fi</text>
+      </g>
+      <g>
+        <rect x="30" y="330" width="200" height="60" rx="8" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="130" y="355" text-anchor="middle">Tempest sensor</text>
+        <text class="s" x="130" y="373" text-anchor="middle">Malaga Hills Dr · outdoor</text>
+      </g>
+      <g>
+        <rect x="30" y="450" width="200" height="60" rx="8" fill="var(--box)" stroke="var(--planned)" stroke-dasharray="6 4"/>
+        <text class="t" x="130" y="475" text-anchor="middle" style="fill:var(--ink-3)">Reolink hail camera</text>
+        <text class="s" x="130" y="493" text-anchor="middle">planned · on hold</text>
+      </g>
+
+      <!-- right: YoLink devices -->
+      <g>
+        <rect x="970" y="200" width="200" height="60" rx="8" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="1070" y="225" text-anchor="middle">YoLink hub</text>
+        <text class="s" x="1070" y="243" text-anchor="middle">LoRa ↔ internet bridge</text>
+      </g>
+      <g>
+        <rect x="970" y="330" width="200" height="60" rx="8" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="1070" y="355" text-anchor="middle">YoLink temp/humidity</text>
+        <text class="s" x="1070" y="373" text-anchor="middle">Attic, Garage, fridges, rooms</text>
+      </g>
+      <g>
+        <rect x="970" y="450" width="200" height="60" rx="8" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="1070" y="475" text-anchor="middle">Car Protector plug</text>
+        <text class="s" x="1070" y="493" text-anchor="middle">powers the hail cover</text>
+      </g>
+
+      <!-- EdgeXpert -->
+      <rect x="400" y="190" width="400" height="378" rx="12" fill="var(--accent-soft)" stroke="currentColor" stroke-width="1.6"/>
+      <text class="t" x="416" y="212">EdgeXpert · 100.86.243.19</text>
+      <text class="s" x="784" y="212" text-anchor="end">Docker · tempest-monitor · Python</text>
+      <g>
+        <rect x="420" y="226" width="360" height="54" rx="7" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="600" y="249" text-anchor="middle">Collectors</text>
+        <text class="s" x="600" y="267" text-anchor="middle">UDP listener · WebSocket fallback · Tempest/NWS/YoLink pollers</text>
+      </g>
+      <g>
+        <rect x="420" y="300" width="360" height="54" rx="7" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="600" y="323" text-anchor="middle">Storm, hail &amp; alert engine</text>
+        <text class="s" x="600" y="341" text-anchor="middle">normal → watch → storm · car cover on/off · alerts</text>
+      </g>
+      <g>
+        <rect x="420" y="374" width="360" height="54" rx="7" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="600" y="397" text-anchor="middle">SQLite · data/tempest.db</text>
+        <text class="s" x="600" y="415" text-anchor="middle">1-min readings · YoLink history · daily rollups · events</text>
+      </g>
+      <g>
+        <rect x="420" y="448" width="200" height="100" rx="7" fill="var(--box)" stroke="var(--live)" stroke-width="1.6"/>
+        <text class="t" x="520" y="474" text-anchor="middle">Web server :8088</text>
+        <text class="s" x="520" y="494" text-anchor="middle">dashboard page</text>
+        <text class="s" x="520" y="510" text-anchor="middle">JSON API</text>
+        <text class="s" x="520" y="526" text-anchor="middle">live stream (SSE)</text>
+      </g>
+      <g>
+        <rect x="640" y="448" width="140" height="100" rx="7" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="710" y="474" text-anchor="middle">Nightly backup</text>
+        <text class="s" x="710" y="494" text-anchor="middle">14 daily copies</text>
+        <text class="s" x="710" y="510" text-anchor="middle">+ 1 per month</text>
+      </g>
+      <!-- inside flows -->
+      <line x1="600" y1="280" x2="600" y2="298" stroke="currentColor" stroke-width="1.4" marker-end="url(#a)"/>
+      <line x1="600" y1="354" x2="600" y2="372" stroke="currentColor" stroke-width="1.4" marker-end="url(#a)"/>
+      <line x1="520" y1="428" x2="520" y2="446" stroke="currentColor" stroke-width="1.4" marker-end="url(#a)"/>
+      <line x1="710" y1="428" x2="710" y2="446" stroke="currentColor" stroke-width="1.4" marker-end="url(#a)"/>
+
+      <!-- Tempest: sensor -> hub radio -->
+      <line x1="130" y1="330" x2="130" y2="262" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2 3" marker-end="url(#a)"/>
+      <text class="p" x="140" y="300">915 MHz radio</text>
+      <!-- hub -> Tempest cloud -->
+      <line x1="130" y1="200" x2="130" y2="116" stroke="var(--cloud)" stroke-width="1.6" marker-end="url(#ac)"/>
+      <text class="p" x="140" y="150">Wi-Fi upload</text>
+      <!-- hub -> EdgeXpert UDP (live) -->
+      <line x1="230" y1="244" x2="418" y2="244" stroke="var(--live)" stroke-width="2.5" marker-end="url(#al)"/>
+      <text class="pl" x="240" y="236">UDP :50222 broadcast</text>
+      <text class="p" x="240" y="262">JSON · wind every 3 s</text>
+      <text class="p" x="240" y="276">readings every 1 min</text>
+      <text class="p" x="240" y="290">rain/lightning instantly</text>
+      <!-- Tempest cloud <-> EdgeXpert -->
+      <polyline points="230,70 440,70 440,188" fill="none" stroke="var(--cloud)" stroke-width="1.6" marker-start="url(#ac)" marker-end="url(#ac)"/>
+      <text class="p" x="250" y="62">HTTPS REST + token · WSS fallback</text>
+      <text class="s" x="300" y="128" text-anchor="middle">forecast · history download</text>
+      <!-- NWS -> EdgeXpert -->
+      <line x1="565" y1="114" x2="565" y2="188" stroke="var(--cloud)" stroke-width="1.6" marker-end="url(#ac)"/>
+      <text class="p" x="557" y="148" text-anchor="end">HTTPS · GeoJSON</text>
+      <text class="s" x="557" y="162" text-anchor="end">warnings, hail size</text>
+      <!-- EdgeXpert -> IFTTT -->
+      <line x1="770" y1="188" x2="770" y2="116" stroke="var(--cloud)" stroke-width="1.6" marker-end="url(#ac)"/>
+      <text class="p" x="778" y="148">HTTPS POST</text>
+      <text class="s" x="778" y="162">webhook events</text>
+      <!-- YoLink cloud <-> EdgeXpert -->
+      <polyline points="970,82 880,82 880,262 802,262" fill="none" stroke="var(--cloud)" stroke-width="1.6" marker-start="url(#ac)" marker-end="url(#ac)"/>
+      <text class="p" x="890" y="140">HTTPS · OAuth token</text>
+      <text class="p" x="890" y="154">JSON API v2</text>
+      <text class="s" x="890" y="170">read sensors</text>
+      <text class="s" x="890" y="184">switch plug</text>
+      <!-- YoLink hub <-> cloud -->
+      <line x1="1070" y1="200" x2="1070" y2="116" stroke="var(--cloud)" stroke-width="1.6" marker-start="url(#ac)" marker-end="url(#ac)"/>
+      <text class="p" x="1080" y="150">internet</text>
+      <!-- sensors -> hub LoRa -->
+      <line x1="1070" y1="330" x2="1070" y2="262" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2 3" marker-end="url(#a)"/>
+      <text class="p" x="1080" y="300">LoRa radio</text>
+      <!-- hub -> plug LoRa -->
+      <polyline points="1170,236 1184,236 1184,480 1172,480" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="2 3" marker-end="url(#a)"/>
+      <text class="p" x="1160" y="420" text-anchor="end">LoRa on/off</text>
+      <!-- Reolink -> EdgeXpert planned -->
+      <line x1="230" y1="480" x2="398" y2="480" stroke="var(--planned)" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#ap)"/>
+      <text class="p" x="240" y="472" style="fill:var(--ink-3)">HTTP snapshot / RTSP</text>
+
+      <!-- bottom row -->
+      <g>
+        <rect x="30" y="656" width="220" height="70" rx="8" fill="var(--box)" stroke="var(--live)" stroke-width="1.6"/>
+        <text class="t" x="140" y="682" text-anchor="middle">Web browser</text>
+        <text class="s" x="140" y="700" text-anchor="middle">PC or phone · LAN or Tailscale</text>
+      </g>
+      <g>
+        <rect x="280" y="656" width="230" height="70" rx="8" fill="var(--box)" stroke="var(--planned)" stroke-dasharray="6 4"/>
+        <text class="t" x="395" y="682" text-anchor="middle" style="fill:var(--ink-3)">Claude artifact</text>
+        <text class="s" x="395" y="700" text-anchor="middle">planned · desktop app reads :8088</text>
+      </g>
+      <g>
+        <rect x="610" y="656" width="200" height="70" rx="8" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="710" y="682" text-anchor="middle">ReadySHARE drive</text>
+        <text class="s" x="710" y="700" text-anchor="middle">//readyshare/Data/WeatherStation</text>
+      </g>
+      <g>
+        <rect x="860" y="656" width="170" height="70" rx="8" fill="var(--box)" stroke="currentColor"/>
+        <text class="t" x="945" y="682" text-anchor="middle">malaga-office</text>
+        <text class="s" x="945" y="700" text-anchor="middle">release.bat</text>
+      </g>
+      <g>
+        <rect x="1060" y="656" width="120" height="70" rx="8" fill="var(--box)" stroke="var(--cloud)"/>
+        <text class="t" x="1120" y="682" text-anchor="middle">GitHub</text>
+        <text class="s" x="1120" y="700" text-anchor="middle">WeatherStation</text>
+      </g>
+
+      <!-- web server -> viewers (live) -->
+      <polyline points="470,548 470,600 140,600 140,654" fill="none" stroke="var(--live)" stroke-width="2.5" marker-end="url(#al)"/>
+      <text class="pl" x="160" y="594">HTTP :8088 · JSON + Server-Sent Events</text>
+      <text class="p" x="160" y="634">WireGuard tunnel (Tailscale) away from home</text>
+      <polyline points="470,600 395,600 395,654" fill="none" stroke="var(--planned)" stroke-width="1.6" stroke-dasharray="6 4" marker-end="url(#ap)"/>
+      <!-- backup -> ReadySHARE -->
+      <line x1="710" y1="548" x2="710" y2="654" stroke="currentColor" stroke-width="1.6" marker-end="url(#a)"/>
+      <text class="p" x="718" y="596">SMB 3 · TCP 445</text>
+      <text class="s" x="718" y="610">nightly</text>
+      <!-- deploy -->
+      <polyline points="945,656 945,540 802,540" fill="none" stroke="currentColor" stroke-width="1.6" marker-end="url(#a)"/>
+      <text class="p" x="955" y="590">SSH / SCP over Tailscale</text>
+      <text class="s" x="955" y="604">docker compose build</text>
+      <line x1="1030" y1="691" x2="1058" y2="691" stroke="var(--cloud)" stroke-width="1.6" marker-end="url(#ac)"/>
+      <text class="p" x="1044" y="682" text-anchor="middle">git</text>
+    </svg>
+    </div>
+    <figcaption>The EdgeXpert is the hub of the system. It hears your Tempest directly on the home network (the blue live path), so storms are tracked even if the internet drops. It calls Tempest, the National Weather Service and YoLink over HTTPS, keeps everything in one SQLite file, and serves the dashboard on port 8088. Alerts leave through IFTTT, backups go to the router's ReadySHARE drive, and new versions arrive from malaga-office.</figcaption>
+  </figure>
+
+  <section>
+    <h2>Protocols at each stage</h2>
+    <div class="tbl">
+      <table>
+        <thead><tr><th>#</th><th>From → To</th><th>Protocol</th><th>What it carries</th><th>How often</th></tr></thead>
+        <tbody>
+          <tr><td class="n">1</td><td>Tempest sensor → Tempest hub</td><td>915 MHz radio (WeatherFlow's own)</td><td>All outdoor readings</td><td>Wind every 3 s, the rest every minute</td></tr>
+          <tr><td class="n">2</td><td>Tempest hub → EdgeXpert</td><td><code>UDP broadcast · port 50222</code> JSON</td><td><code>obs_st</code> readings, <code>rapid_wind</code>, <code>evt_strike</code> lightning, <code>evt_precip</code> rain start, hail flag</td><td>Continuous; free, no internet needed</td></tr>
+          <tr><td class="n">3</td><td>Tempest hub → Tempest cloud</td><td>Wi-Fi 2.4 GHz → internet</td><td>Same readings, stored by Tempest</td><td>Continuous</td></tr>
+          <tr><td class="n">4</td><td>EdgeXpert ↔ Tempest cloud</td><td><code>HTTPS REST</code> with bearer token; <code>WSS</code> WebSocket fallback</td><td>Station info, forecast, full history download (1 day per request); live feed only if UDP goes quiet</td><td>Forecast every 15 min in storms, 3 h otherwise</td></tr>
+          <tr><td class="n">5</td><td>EdgeXpert → National Weather Service</td><td><code>HTTPS REST</code> · GeoJSON</td><td>Watches and warnings for your location, including hail size</td><td>Every 5 min; 2 min during storms</td></tr>
+          <tr><td class="n">6</td><td>YoLink sensors → YoLink hub</td><td>LoRa radio (902–928 MHz)</td><td>Temperature, humidity, battery, alarms</td><td>As each sensor reports</td></tr>
+          <tr><td class="n">7</td><td>YoLink hub ↔ YoLink cloud</td><td>Wi-Fi / Ethernet → internet</td><td>Sensor reports up, plug commands down</td><td>Continuous</td></tr>
+          <tr><td class="n">8</td><td>EdgeXpert ↔ YoLink cloud</td><td><code>HTTPS</code> · OAuth2 client credentials (UAID + secret) → JSON API v2</td><td><code>Home.getDeviceList</code>, <code>THSensor.getState</code>, <code>Outlet.setState</code> / <code>getState</code></td><td>Sensors every 5 min; plug when hail is expected</td></tr>
+          <tr><td class="n">9</td><td>YoLink hub → Car Protector</td><td>LoRa radio</td><td>On / off</td><td>When the cover inflates or deflates</td></tr>
+          <tr><td class="n">10</td><td>EdgeXpert → IFTTT</td><td><code>HTTPS POST</code> webhook (maker.ifttt.com)</td><td>Events like <code>tempest_storm_start</code>, <code>tempest_hail_warning</code> with three values</td><td>Only when an alert fires</td></tr>
+          <tr><td class="n">11</td><td>Browser ↔ EdgeXpert</td><td><code>HTTP :8088</code> · JSON API + Server-Sent Events; WireGuard via Tailscale when away</td><td>The dashboard: Weather, YoLink and History tabs</td><td>Live push while the page is open</td></tr>
+          <tr><td class="n">12</td><td>EdgeXpert → ReadySHARE drive</td><td><code>SMB 3 · TCP 445</code>, guest login</td><td>Copies of the SQLite database</td><td>Nightly, plus "Back up now"</td></tr>
+          <tr><td class="n">13</td><td>malaga-office → GitHub</td><td><code>git over HTTPS</code></td><td>Source code</td><td>Each release</td></tr>
+          <tr><td class="n">14</td><td>malaga-office → EdgeXpert</td><td><code>SSH / SCP</code> over Tailscale, then Docker build</td><td>New version and settings file</td><td>Each release</td></tr>
+          <tr><td class="n">15</td><td class="planned">Reolink camera → EdgeXpert<span class="tag">Planned</span></td><td class="planned"><code>HTTP</code> snapshot API (or <code>RTSP</code>)</td><td class="planned">Hail plate images to measure stones</td><td class="planned">Every 2 s during storms</td></tr>
+          <tr><td class="n">16</td><td class="planned">Claude artifact ↔ EdgeXpert<span class="tag">Planned</span></td><td class="planned">Page served from claude.ai over <code>HTTPS</code>; the desktop app's built-in browser reads <code>HTTP :8088</code> over Tailscale</td><td class="planned">Live readings inside Claude</td><td class="planned">Live, only in the Claude desktop app</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="notes">
+    <div><h3>Why UDP first</h3><p>The hub broadcasts on your network for free, with no rate limits and no internet needed, so wind gusts and lightning arrive within seconds. The cloud is only the backup path and the source for forecasts and history.</p></div>
+    <div><h3>One file holds everything</h3><p>All readings, YoLink history, daily summaries and the activity log live in one SQLite file, which makes the nightly backup a single copy to ReadySHARE.</p></div>
+    <div><h3>What reaches the internet</h3><p>Only outbound HTTPS calls (Tempest, NWS, YoLink, IFTTT). Nothing on the EdgeXpert is opened to the internet; you reach the dashboard through Tailscale.</p></div>
+  </section>
+</div>
+
+</body>
+</html>

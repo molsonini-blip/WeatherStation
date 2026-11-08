@@ -5,6 +5,10 @@ detects storms on its own, goes live when one is coming, serves a dashboard, and
 
 ## How it works
 
+See **[docs/architecture.html](docs/architecture.html)** for the block diagram and the protocol used at each stage
+(download and open it in a browser).
+
+
 | Mode | When | What happens |
 |---|---|---|
 | **Normal** | Quiet weather | 1-minute observations stored. Forecast checked every 3 h, NWS alerts every 15 min. Daily summary at 7:00 am. Dashboard refreshes every 5 min. |
