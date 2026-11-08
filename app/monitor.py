@@ -95,6 +95,20 @@ class Config:
     yolink_secret: str | None = env("YOLINK_SECRET")
     yolink_device: str | None = env("YOLINK_DEVICE")  # plug name as shown in the YoLink app, or its deviceId
     yolink_host: str = env("YOLINK_HOST", "https://api.yosmart.com")
+    # hail camera (Reolink + printed size markers on a dark plate)
+    hailcam_host: str | None = env("HAILCAM_HOST")
+    hailcam_user: str = env("HAILCAM_USER", "admin")
+    hailcam_password: str = env("HAILCAM_PASSWORD", "")
+    hailcam_channel: int = env("HAILCAM_CHANNEL", 0, int)
+    hailcam_https: bool = env("HAILCAM_HTTPS", "false").lower() in ("1", "true", "yes")
+    hailcam_rtsp: str | None = env("HAILCAM_RTSP")
+    hailcam_interval_s: float = env("HAILCAM_INTERVAL_S", 2, float)
+    hailcam_plate: str = env("HAILCAM_PLATE_MM", "400x400")
+    hailcam_marker_mm: float = env("HAILCAM_MARKER_MM", 50, float)
+    hailcam_inset_mm: float = env("HAILCAM_INSET_MM", 12, float)
+    hailcam_min_mm: float = env("HAILCAM_MIN_MM", 5, float)
+    hailcam_alert_mm: float = env("HAILCAM_ALERT_MM", 6, float)
+    hailcam_end_min: float = env("HAILCAM_END_MIN", 10, float)  # no new stones this long = hail event over
     live_forecast_min: float = env("LIVE_FORECAST_MIN", 15, float)
     live_nws_min: float = env("LIVE_NWS_MIN", 2, float)
     daily_summary_time: str = env("DAILY_SUMMARY_TIME", "07:00")
@@ -108,7 +122,7 @@ REST = "https://swd.weatherflow.com/swd/rest"
 WS_URL = "wss://ws.weatherflow.com/swd/data"
 STATIC = Path(__file__).parent / "static"
 
-ALERT_LABELS = dict(shield_failed="Car cover plug FAILED", hail_shield_on="Hail shield ON", hail_shield_off="Hail shield OFF", hail="Hail at station", hail_warning="Hail warning", watch_start="Storm watch", storm_start="Storm started", storm_end="Storm ended",
+ALERT_LABELS = dict(hail_measured="Hail measured", hail_report="Hail report", shield_failed="Car cover plug FAILED", hail_shield_on="Hail shield ON", hail_shield_off="Hail shield OFF", hail="Hail at station", hail_warning="Hail warning", watch_start="Storm watch", storm_start="Storm started", storm_end="Storm ended",
                     all_clear="All clear", lightning_close="Close lightning", high_wind="High wind",
                     heavy_rain="Heavy rain", nws_alert="NWS", daily="Daily summary", offline="Station offline",
                     test="Test")
@@ -189,6 +203,10 @@ CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTE
 CREATE TABLE IF NOT EXISTS storms (id INTEGER PRIMARY KEY AUTOINCREMENT, start_ts INTEGER,
   end_ts INTEGER, reasons TEXT, summary TEXT);
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
+CREATE TABLE IF NOT EXISTS hail_frames (ts INTEGER PRIMARY KEY, visible INTEGER, new INTEGER, max_mm REAL,
+  sizes TEXT, image TEXT);
+CREATE TABLE IF NOT EXISTS hail_events (id INTEGER PRIMARY KEY AUTOINCREMENT, start_ts INTEGER, end_ts INTEGER,
+  summary TEXT, image TEXT);
 """
 
 
@@ -245,6 +263,8 @@ class Monitor:
     offline_alerted: bool = False
     _mode_changed: asyncio.Event = field(default_factory=asyncio.Event)
     yolink: dict = field(default_factory=dict)
+    cam: dict = field(default_factory=lambda: dict(enabled=False, active=False, last_ts=None, error=None,
+                                                    markers=0, event_id=None, last_new_ts=None, alerted_mm=0))
     shield: dict = field(default_factory=lambda: dict(on=False, mode="auto", since=None, clear_since=None,
                                                       reason="", last_sent=0))
 
@@ -471,6 +491,8 @@ class Monitor:
         if self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND precip_type IN (2,3)",
                      (self.since(max(CFG.storm_lookback_min, 15) * 60),))[0]["n"]:
             out.append("hail detected at station")
+        if self.cam.get("last_new_ts") and time.time() - self.cam["last_new_ts"] < 15 * 60:
+            out.append(f"hail on camera (up to {self.hail_det.max_mm:.0f} mm)")
         return out
 
     def update_shield(self):
@@ -695,6 +717,7 @@ class Monitor:
             last_strike=dict(ts=last[0]["ts"], mi=km_to_mi(last[0]["dist_km"])) if last else None,
             battery=o.get("battery"), rapid=self.rapid, precip_type=o.get("precip_type"),
             last_packet=self.last_packet or None, ifttt=bool(CFG.ifttt_key), shield=self.shield_state(),
+            hailcam=self.hailcam_state(),
         )
 
     # --------------------------------------------------------------- REST helpers
@@ -835,6 +858,115 @@ class Monitor:
         if s:
             self.alert("daily", f"{s['date']}: {s['hi_f']}°/{s['lo_f']}°, {s['rain_in']:.2f} in rain",
                        f"gust {s['max_gust_mph']} mph, {s['strikes']} strikes", fc, cooldown=False)
+
+    # --------------------------------------------------------------- hail camera
+    def hailcam_setup(self):
+        if not (CFG.hailcam_host or CFG.hailcam_rtsp):
+            return
+        from hailcam import HailDetector, PlateConfig, ReolinkCamera
+        w, h = (float(x) for x in CFG.hailcam_plate.lower().split("x"))
+        self.plate_cfg = PlateConfig(width_mm=w, height_mm=h, marker_mm=CFG.hailcam_marker_mm,
+                                     inset_mm=CFG.hailcam_inset_mm, min_mm=CFG.hailcam_min_mm)
+        self.hail_det = HailDetector(self.plate_cfg)
+        self.camera = ReolinkCamera(self.http, CFG.hailcam_host, CFG.hailcam_user, CFG.hailcam_password,
+                                    CFG.hailcam_channel, CFG.hailcam_https, CFG.hailcam_rtsp)
+        self.cam_dir = Path(CFG.db_path).parent / "hailcam"
+        self.cam_dir.mkdir(parents=True, exist_ok=True)
+        self.cam["enabled"] = True
+        log.info("hail camera enabled (%s), plate %s mm", CFG.hailcam_host or "RTSP", CFG.hailcam_plate)
+
+    def hailcam_should_run(self):
+        recent_station_hail = self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND precip_type IN (2,3)",
+                                        (self.since(15 * 60),))[0]["n"]
+        return self.live or recent_station_hail or any(a.get("hail_in") is not None for a in self.nws)
+
+    async def hailcam_capture(self, detector, count=True):
+        import cv2
+        frame = await self.camera.snapshot()
+        loop = asyncio.get_running_loop()
+        res = await loop.run_in_executor(None, detector.analyze, frame, time.time())
+        self.cam.update(last_ts=int(res.ts), error=res.error, markers=res.markers)
+        if res.annotated is not None:
+            cv2.imwrite(str(self.cam_dir / "latest.jpg"), res.annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        cv2.imwrite(str(self.cam_dir / "latest_raw.jpg"), frame, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        return res, frame
+
+    async def hailcam_loop(self):
+        import cv2
+        if not self.cam["enabled"]:
+            return
+        while True:
+            run = self.hailcam_should_run() or self.cam.get("test_until", 0) > time.time()
+            if not run:
+                if self.cam["active"]:
+                    self.hailcam_finish()
+                await asyncio.sleep(10)
+                continue
+            if not self.cam["active"]:
+                self.cam["active"] = True
+                self.hail_det.reset()
+                self.cam.update(event_id=None, last_new_ts=None, alerted_mm=0)
+                self.log_event("hailcam", "Hail camera watching the plate")
+            try:
+                res, frame = await self.hailcam_capture(self.hail_det)
+                if res.ok and res.new:
+                    self.on_camera_hail(res)
+                if (self.cam["last_new_ts"] and time.time() - self.cam["last_new_ts"] > CFG.hailcam_end_min * 60
+                        and not self.hailcam_should_run()):
+                    self.hailcam_finish()
+                self.push("hailcam", self.hailcam_state())
+            except Exception as e:
+                self.cam["error"] = str(e)[:200]
+                log.warning("hail camera: %s", e)
+                await asyncio.sleep(10)
+            await asyncio.sleep(CFG.hailcam_interval_s)
+
+    def on_camera_hail(self, res):
+        import cv2
+        now = time.time()
+        first = self.cam["last_new_ts"] is None
+        self.cam["last_new_ts"] = now
+        stamp = datetime.fromtimestamp(now, ZoneInfo(CFG.tz))
+        rel = f"{stamp:%Y-%m-%d}/{stamp:%H%M%S}.jpg"
+        (self.cam_dir / f"{stamp:%Y-%m-%d}").mkdir(exist_ok=True)
+        if res.annotated is not None:
+            cv2.imwrite(str(self.cam_dir / rel), res.annotated, [cv2.IMWRITE_JPEG_QUALITY, 85])
+        sizes = [round(s["d_mm"], 1) for s in res.stones]
+        self.db.x("INSERT OR REPLACE INTO hail_frames VALUES (?,?,?,?,?,?)",
+                  (int(now), len(res.stones), res.new, max(sizes or [0]), json.dumps(sizes), rel))
+        if first:
+            self.cam["event_id"] = self.db.x("INSERT INTO hail_events (start_ts, image) VALUES (?,?)", (int(now), rel))
+        from hailcam import hail_label
+        mx = self.hail_det.max_mm
+        if mx >= CFG.hailcam_alert_mm and (first or mx >= self.cam["alerted_mm"] + 5):
+            self.cam["alerted_mm"] = mx
+            self.alert("hail_measured", f"Hail on camera: up to {mx:.0f} mm ({mx / 25.4:.2f} in, {hail_label(mx)})",
+                       f"{self.hail_det.total_new} stones counted so far", "", cooldown=False)
+        if first:
+            asyncio.get_event_loop().call_soon(self.evaluate)
+
+    def hailcam_finish(self):
+        self.cam["active"] = False
+        if self.cam.get("event_id"):
+            from hailcam import hail_label
+            sm = self.hail_det.summary()
+            best = self.db.q("SELECT image FROM hail_frames WHERE ts>=? ORDER BY max_mm DESC LIMIT 1",
+                             (int(sm["started"] or 0),))
+            self.db.x("UPDATE hail_events SET end_ts=?, summary=?, image=COALESCE(?, image) WHERE id=?",
+                      (int(time.time()), json.dumps(sm), best[0]["image"] if best else None, self.cam["event_id"]))
+            self.alert("hail_report", f"{sm['count']} stones, largest {sm['max_mm']:.0f} mm ({hail_label(sm['max_mm'])})",
+                       f"median {sm['median_mm']} mm · {sm['per_ft2']} per sq ft", "", cooldown=False)
+        self.log_event("hailcam", "Hail camera idle")
+        self.cam["event_id"] = None
+        self.push("hailcam", self.hailcam_state())
+
+    def hailcam_state(self):
+        c = dict(self.cam)
+        c.pop("test_until", None)
+        if c["enabled"]:
+            c["event"] = self.hail_det.summary() if c["active"] else None
+            c["plate"] = CFG.hailcam_plate
+        return c
 
     # --------------------------------------------------------------- loops
     async def udp_loop(self):
@@ -1110,6 +1242,40 @@ def build_app(mon: Monitor):
 
     r.add_get("/api/shield", shield)
     r.add_post("/api/shield", shield)
+
+    async def hailcam_status(req):
+        st = mon.hailcam_state()
+        st["events"] = []
+        for e in mon.db.q("SELECT * FROM hail_events ORDER BY id DESC LIMIT 10"):
+            e["summary"] = json.loads(e["summary"]) if e["summary"] else None
+            st["events"].append(e)
+        return web.json_response(st)
+
+    async def hailcam_image(req):
+        if not mon.cam["enabled"]:
+            raise web.HTTPNotFound()
+        name = req.query.get("f") or ("latest_raw.jpg" if req.query.get("raw") else "latest.jpg")
+        path = (mon.cam_dir / name).resolve()
+        if mon.cam_dir.resolve() not in path.parents or not path.is_file():
+            raise web.HTTPNotFound()
+        return web.FileResponse(path, headers={"Cache-Control": "no-store"})
+
+    async def hailcam_test(req):
+        """One-off capture to check aim, focus and that all 4 markers are seen. Doesn't count stones."""
+        if not mon.cam["enabled"]:
+            return web.json_response(dict(ok=False, error="HAILCAM_HOST not set"), status=400)
+        from hailcam import HailDetector
+        try:
+            res, _ = await mon.hailcam_capture(HailDetector(mon.plate_cfg))
+        except Exception as e:
+            return web.json_response(dict(ok=False, error=str(e)[:200]), status=502)
+        mon.push("hailcam", mon.hailcam_state())
+        return web.json_response(dict(ok=res.ok, error=res.error, markers=res.markers,
+                                      stones=[round(x["d_mm"], 1) for x in res.stones]))
+
+    r.add_get("/api/hailcam", hailcam_status)
+    r.add_get("/api/hailcam/image", hailcam_image)
+    r.add_post("/api/hailcam/test", hailcam_test)
     r.add_static("/static", STATIC)
     return app
 
@@ -1149,7 +1315,8 @@ async def main():
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", CFG.http_port).start()
     log.info("dashboard on http://0.0.0.0:%d", CFG.http_port)
-    await asyncio.gather(mon.udp_loop(), mon.ws_loop(), mon.scheduler(), mon.daily_loop())
+    mon.hailcam_setup()
+    await asyncio.gather(mon.udp_loop(), mon.ws_loop(), mon.scheduler(), mon.daily_loop(), mon.hailcam_loop())
 
 
 if __name__ == "__main__":

@@ -1,1 +1,2 @@
 aiohttp==3.11.18
+opencv-python-headless==4.10.0.84

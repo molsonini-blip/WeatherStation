@@ -109,12 +109,48 @@ Or set `HAIL_SHIELD_ON_URL` / `HAIL_SHIELD_OFF_URL` to call Home Assistant or th
 | `HAIL_SHIELD_MAX_HOURS` | 0 | safety cutoff (0 = none) |
 | `HAIL_SHIELD_RESEND_MIN` | 0 | re-send "on" every N min while inflated, in case a plug command is missed (costs IFTTT credits) |
 
+## Hail camera (Reolink + AI measurement)
+
+A Reolink camera looks down at a **hail plate**: a matte black board (400 × 400 mm by default) with four printed markers
+in its corners. During storm watches, storms, NWS hail alerts or station-detected hail, the monitor grabs a frame every
+2 seconds, straightens the plate using the markers, and measures every hailstone in millimetres. Each stone is counted once
+as it lands.
+
+**You get:** largest stone (with the familiar name: pea, penny, quarter, golf ball…), count, median size, stones per sq ft,
+a size histogram, and photos with every stone outlined (saved in `data/hailcam/<date>/`).
+Alerts: `tempest_hail_measured` (first stone, and again whenever the largest grows by 5 mm) and `tempest_hail_report`
+(summary when the hail stops). Camera-confirmed hail also inflates the car cover.
+
+**Setup**
+1. Print the markers: `python tools/make_marker.py hail_markers.pdf` (or use the PDF in this repo's release). Print at 100 %,
+   check the 100 mm ruler, laminate them.
+2. Plate: matte black, flat, slightly tilted so meltwater drains. Glue the markers in the corners (ID 0 top-left, 1 top-right,
+   2 bottom-right, 3 bottom-left as the camera sees it), black square 12 mm in from each edge.
+3. Camera: mounted 1–2 m above the plate, looking down as straight as practical, plate filling most of the frame,
+   under an overhang so the lens stays dry. 4K or 1080p main stream. IR on at night works: ice shows bright on the black plate.
+4. Settings: `HAILCAM_HOST` (camera IP), `HAILCAM_USER`, `HAILCAM_PASSWORD`. Give the camera a fixed IP.
+   If the camera is behind an NVR, set `HAILCAM_RTSP=rtsp://user:pass@ip:554/h264Preview_01_main` instead.
+5. Dashboard → Hail camera → **Test capture**: you want **4/4 markers**. "Camera view" shows the raw image for aiming.
+
+Test without hail: `python tools/synth_hail.py /tmp/hail` makes synthetic plate frames with known stone sizes.
+In testing on synthetic frames the sizes came out within about 1–2 mm.
+
+| Setting | Default | |
+|---|---|---|
+| `HAILCAM_PLATE_MM` | 400x400 | plate width x height |
+| `HAILCAM_MARKER_MM` | 50 | printed black-square size |
+| `HAILCAM_INSET_MM` | 12 | marker distance from plate edges |
+| `HAILCAM_INTERVAL_S` | 2 | seconds between frames while active |
+| `HAILCAM_MIN_MM` | 5 | ignore smaller objects |
+| `HAILCAM_ALERT_MM` | 6 | smallest stone that triggers `tempest_hail_measured` |
+| `HAILCAM_END_MIN` | 10 | minutes without new stones = hail over |
+
 ## API
 
 These endpoints are useful for Home Assistant, Grafana, or your LLM stack:
 
 `/api/state` · `/api/history?hours=24` · `/api/rapid?minutes=30` · `/api/strikes?hours=24` ·
-`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/wind_rose?hours=24` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
+`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/wind_rose?hours=24` · `/api/hailcam` · `/api/hailcam/image` · `POST /api/hailcam/test` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
 `POST /api/test-ifttt`
 
 ## Notes

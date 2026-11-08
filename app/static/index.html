@@ -98,6 +98,15 @@ td.n,th.n{text-align:right}
 #cRose .card{fill:var(--ink-2);font-size:12px;font-weight:600}
 .rlegend{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--ink-2)}
 .rlegend span{display:flex;align-items:center;gap:6px}.rlegend i{width:12px;height:12px;border-radius:3px;display:inline-block}
+.hcam{grid-column:span 12;display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr);gap:16px}
+.hcam img{width:100%;aspect-ratio:1;object-fit:contain;background:var(--surface-2);border-radius:10px;display:block}
+.hcam .stats{display:grid;grid-template-columns:auto 1fr;gap:4px 12px;font-size:13px;color:var(--ink-2);align-content:start}
+.hcam .stats b{color:var(--ink);text-align:right;font-weight:550}
+.hcam .big2{font-size:36px;font-weight:500;letter-spacing:-.02em;grid-column:span 2;color:var(--ink)}
+.hist{display:flex;align-items:flex-end;gap:4px;height:70px;margin-top:6px;grid-column:span 2}
+.hist div{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;font-size:10px;color:var(--ink-3)}
+.hist i{display:block;width:100%;background:var(--s1);border-radius:3px 3px 0 0;min-height:1px}
+@media (max-width:900px){.hcam{grid-template-columns:1fr}}
 .live-only{display:none}body.live .live-only{display:block}
 @media (max-width:900px){.hero,.tiles,.chart,.half{grid-column:span 12}.tiles{grid-template-columns:repeat(2,1fr)}.fc{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:520px){.big{font-size:52px}.tiles{grid-template-columns:1fr 1fr}.fc{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -158,6 +167,15 @@ td.n,th.n{text-align:right}
       <span class="st"><span class="dot"></span><span id="shieldSt">Off</span></span>
       <span class="why" id="shieldWhy"></span>
       <div class="seg" id="shieldMode" role="group" aria-label="Hail cover mode"><button data-m="auto">Auto</button><button data-m="on">On</button><button data-m="off">Off</button></div>
+    </section>
+
+    <section class="card hcam" id="hcamCard" style="display:none">
+      <div><div class="head" style="display:flex;align-items:baseline;gap:8px;margin-bottom:8px"><h2 style="margin:0">Hail camera</h2>
+        <span class="sub" id="hcamSt"></span><span style="flex:1"></span>
+        <div class="seg"><button id="hcamTest">Test capture</button><button id="hcamRaw" aria-pressed="false">Camera view</button></div></div>
+        <img id="hcamImg" alt="Hail plate seen from above, with measured stones outlined">
+      </div>
+      <div class="stats" id="hcamStats"></div>
     </section>
 
     <section class="card chart wide live-only" id="liveCard">
@@ -374,6 +392,7 @@ function renderState(s) {
   bn.innerHTML = mode === "storm" ? `<b>⚠ Storm in progress</b>${s.storm_start ? ` since ${tstr(s.storm_start)}` : ""} · ${escapeHtml((s.reasons || []).join(" · "))}`
     : mode === "watch" ? `<b>◔ Storm watch</b> · ${escapeHtml((s.reasons || []).join(" · "))}` : "";
   if (s.shield) renderShield(s.shield);
+  if (s.hailcam) renderHailcam(s.hailcam);
   if (s.forecast) renderForecast(s.forecast);
   if (s.nws) renderNws(s.nws);
   freshness();
@@ -409,6 +428,35 @@ function wxIcon(icon, cond = "") {
   else g = night ? WX.moon() : WX.sun();
   return `<svg class="wx" viewBox="0 0 64 64" role="img" aria-label="${escapeHtml(cond)}">${g}</svg>`;
 }
+
+let hcamRaw = false;
+function renderHailcam(c) {
+  if (!c || !c.enabled) return;
+  $("hcamCard").style.display = "";
+  $("hcamSt").textContent = (c.active ? "● watching" : "idle — runs automatically during storms") + (c.last_ts ? ` · last frame ${ago(c.last_ts)}` : "");
+  $("hcamImg").src = `/api/hailcam/image?${hcamRaw ? "raw=1&" : ""}t=${c.last_ts || 0}`;
+  const e = c.event, mm = v => v == null ? "--" : `${fmt(v)} mm (${fmt(v / 25.4, 2)} in)`;
+  const lab = v => !v ? "" : v >= 70 ? "baseball+" : v >= 44 ? "golf ball" : v >= 32 ? "half dollar" : v >= 25 ? "quarter" : v >= 19 ? "penny" : v >= 13 ? "marble" : "pea";
+  let h = `<span>Markers seen</span><b>${c.markers}/4${c.markers < 4 && c.last_ts ? " ⚠" : ""}</b>`;
+  if (c.error) h += `<span>Problem</span><b>⚠ ${escapeHtml(c.error)}</b>`;
+  if (e && e.count) {
+    h = `<div class="big2">${fmt(e.max_mm)} mm <span class="sub">largest · ${lab(e.max_mm)}</span></div>` + h +
+      `<span>Stones counted</span><b>${e.count}</b><span>Median size</span><b>${mm(e.median_mm)}</b><span>Density</span><b>${e.per_ft2} per sq ft</b><span>Since</span><b>${tstr(e.started)}</b>`;
+    const mx = Math.max(1, ...e.histogram.map(b => b.n));
+    h += `<div class="hist" title="Stones by size (mm)">${e.histogram.map(b => `<div><span>${b.n || ""}</span><i style="height:${b.n / mx * 48}px"></i>${b.lo}${b.hi ? "" : "+"}</div>`).join("")}</div>`;
+  } else h = `<div class="big2">No hail <span class="sub">on the plate</span></div>` + h;
+  h += `<span>Plate</span><b>${c.plate} mm</b>`;
+  $("hcamStats").innerHTML = h;
+  if (Date.now() - (window._hcEv || 0) < 60000) return; window._hcEv = Date.now();
+  j("/api/hailcam").then(st => { if (!st.events.length) return;
+    $("hcamStats").insertAdjacentHTML("beforeend", `<span style="grid-column:span 2;margin-top:8px;font-weight:600;color:var(--ink)">Past hail</span>` +
+      st.events.slice(0, 5).map(ev => `<span>${dtstr(ev.start_ts)}</span><b>${ev.summary ? `${ev.summary.count} stones · max ${fmt(ev.summary.max_mm)} mm` : "in progress"}</b>`).join("")); }).catch(() => {});
+}
+$("hcamRaw").onclick = () => { hcamRaw = !hcamRaw; $("hcamRaw").setAttribute("aria-pressed", hcamRaw); renderHailcam(state.hailcam); };
+$("hcamTest").onclick = async () => { $("hcamSt").textContent = "capturing…";
+  const r = await fetch("/api/hailcam/test", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
+  $("hcamSt").textContent = r.ok ? `test OK · ${r.markers}/4 markers · ${r.stones.length} objects` : `test failed: ${r.error}`;
+  $("hcamImg").src = `/api/hailcam/image?${hcamRaw ? "raw=1&" : ""}t=${Date.now()}`; };
 
 function renderShield(sh) {
   if (!sh || !sh.enabled) return;
@@ -471,6 +519,7 @@ function connect() {
   es.addEventListener("strike", e => { strikes.push(JSON.parse(e.data)); drawAll(); });
   es.addEventListener("mode", e => { renderState(JSON.parse(e.data)); loadHistory(); loadLists(); });
   es.addEventListener("event", () => loadLists());
+  es.addEventListener("hailcam", e => { state.hailcam = JSON.parse(e.data); renderHailcam(state.hailcam); });
   es.addEventListener("shield", e => { renderShield(JSON.parse(e.data)); loadLists(); });
   es.addEventListener("hail", () => { $("rainD").textContent = "⚠ Hail detected"; loadLists(); });
   es.addEventListener("forecast", e => renderForecast(JSON.parse(e.data)));
