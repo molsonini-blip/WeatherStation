@@ -115,10 +115,10 @@ def money(s):
     return float(s.replace(",", "").replace("$", ""))
 
 
-def pdf_text(data: bytes) -> str:
+def pdf_text(data: bytes, pages: int = 6) -> str:
     from pypdf import PdfReader
     reader = PdfReader(io.BytesIO(data))
-    return "\n".join((p.extract_text() or "") for p in reader.pages[:6])
+    return "\n".join((p.extract_text() or "") for p in reader.pages[:pages])
 
 
 def extract(text: str) -> dict:

@@ -180,6 +180,7 @@ button.danger{box-shadow:inset 0 0 0 1px var(--critical);color:var(--critical)}
 .whatif b{color:var(--ink)}
 #pDetail h3{font-size:11px;font-weight:650;color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em;margin:16px 0 6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 #pgProperties a{color:var(--s1)}
+#pgProperties .head{flex-wrap:wrap;row-gap:4px}#pgProperties .head .legend{flex-wrap:wrap}
 #pDetail h3 .legend{text-transform:none;letter-spacing:0;font-weight:400}
 table.tight td,table.tight th{padding:4px 8px}
 </style>
@@ -373,6 +374,9 @@ table.tight td,table.tight th{padding:4px 8px}
         <div class="sub">From today to each loan's payoff at the current payment (balance, rate and principal + interest from the latest statement). Tick = loan maturity date where the statement shows one.</div></section>
       <div class="pcards" id="pCards"></div>
       <section class="card" id="pDetail" style="grid-column:span 12" hidden></section>
+      <section class="card chart wide" style="grid-column:span 12"><div class="head"><h2>Rent collected by year</h2><span class="legend" id="pRentLeg"></span><span class="now" id="pRentNow"></span></div><svg class="viz" id="pRentChart" style="height:230px"></svg></section>
+      <section class="card" style="grid-column:span 12"><div class="head"><h2>Rental performance</h2><span class="now" id="pPerfWin"></span></div><div style="overflow:auto"><table id="pPerf" class="tight"></table></div>
+        <div class="sub" style="margin-top:6px">From the Presidio Group owner statements. Net operating = rent and other income minus management fees, repairs, utilities and leasing fees. Cash flow = net operating minus the mortgage payment (principal, interest and escrow for taxes and insurance) at today's payment. Security deposits and money you put in are left out.</div></section>
       <section class="card chart"><div class="head"><h2>Property taxes by year</h2><span class="legend" id="pTaxLeg"></span></div><svg class="viz" id="pTax" style="height:230px"></svg></section>
       <section class="card chart"><div class="head"><h2>Insurance by year</h2><span class="legend" id="pInsLeg"></span></div><svg class="viz" id="pIns" style="height:230px"></svg></section>
       <section class="card" style="grid-column:span 12"><h2>Taxes &amp; insurance trend</h2><div style="overflow:auto"><table id="pTrend" class="tight"></table></div>
@@ -1203,14 +1207,17 @@ function renderProps() {
   const ti = pSum.taxins, lastY = k => ti.filter(t => !t.estimate && t.kind === k).map(t => t.year).sort().pop(), ly = lastY("tax"), li = lastY("insurance");
   const sumY = (y, k) => ti.filter(t => t.year === y && t.kind === k).reduce((a, t) => a + t.amount, 0);
   const last = loans.map(l => l.payoff_date).filter(Boolean).sort().pop();
-  const rent = P.reduce((a, p) => a + (p.rent || 0), 0);
   $("pTiles").innerHTML = [
     ["Mortgage balance", usd(bal), `${loans.length} loan${loans.length === 1 ? "" : "s"} · ${P.length} properties`],
     ["Monthly payments", usd(pay), `${usd(pi)} principal &amp; interest · ${usd(pay - pi)} escrow`],
     ["Escrow balances", usd(esc), "held by the servicers for taxes and insurance"],
     [`Property taxes ${ly || ""}`, ly ? usd(sumY(ly, "tax")) : "--", "all properties, where known"],
     [`Insurance ${li || ""}`, li ? usd(sumY(li, "insurance")) : "--", "all properties, where known"],
-    ["Mortgage-free", last ? monthYear(last) : "--", rent ? `rent ${usd(rent)}/mo vs payments ${usd(pay)}/mo` : "last loan paid off at today's payments"],
+    ["Mortgage-free", last ? monthYear(last) : "--", "last loan paid off at today's payments"],
+    ...(() => { const st = P.map(p => rentStats(p.id)).filter(Boolean); if (!st.length) return [];
+      const r = st.reduce((a, x) => a + x.rentMo, 0), c = st.reduce((a, x) => a + x.cashMo, 0);
+      return [["Rent", usd(r), `a month from ${st.length} rentals (last 12 months)`],
+              ["Rental cash flow", `<span class="${c < 0 ? "up" : "down"}">${usd(c)}</span>`, "a month after expenses and mortgages"]]; })(),
   ].map(([h, v, d]) => `<div class="card"><h2>${h}</h2><div class="v">${v}</div><div class="d">${d}</div></div>`).join("");
   $("pCards").innerHTML = P.map(p => {
     const k = PKIND[p.kind] || PKIND.rental, by = taxinsFor(p.id), ys = Object.keys(by).map(Number).sort();
@@ -1225,11 +1232,12 @@ function renderProps() {
         <div class="meta"><span>Paid off <b>${l.payoff_date ? monthYear(l.payoff_date) : "--"}</b>${l.months_left ? ` · ${Math.floor(l.months_left / 12)} y ${l.months_left % 12} m` : ""}</span><span>Escrow ${usd(s.escrow_balance)}</span></div>`
         : `<div class="amt" style="color:var(--ink-2)">${p.loans.length ? "Paid off" : "No mortgage"}</div><div class="meta"><span>${p.loans.length ? "" : "No statements yet"}</span></div>`}
       <div class="meta"><span>Tax ${y || ""} <b>${tax ? usd(tax.amount) : "--"}</b> ${tax && ptax ? pct(tax.amount, ptax.amount) : ""}</span><span>Insurance ${yi || ""} <b>${ins ? usd(ins.amount) : "--"}</b> ${ins && pins ? pct(ins.amount, pins.amount) : ""}</span></div>
+      ${(() => { const r = rentStats(p.id); return r ? `<div class="meta"><span>Rent <b>${usd(r.rentMo)}</b>/mo</span><span>Cash flow <b class="${r.cash < 0 ? "up" : "down"}">${usd(r.cashMo)}</b>/mo</span></div>` : ""; })()}
       ${s && s.status === "review" ? `<span class="pill warn" style="margin-top:8px">Needs review</span>` : ""}</div>`; }).join("");
   $("pCards").querySelectorAll(".pc").forEach(c => { const go = () => { pSel = pSel === +c.dataset.id ? null : +c.dataset.id; renderProps(); drawProps();
       if (pSel) $("pDetail").scrollIntoView({block: "nearest", behavior: "smooth"}); };
     c.onclick = go; c.onkeydown = e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); go(); } }; });
-  renderTrend(); renderDetail();
+  renderTrend(); renderRent(); renderDetail();
 }
 function renderTrend() {
   const P = pSum.properties, ys = [...new Set(pSum.taxins.map(t => t.year))].sort();
@@ -1274,6 +1282,7 @@ function renderDetail() {
       <select id="pcKind"><option value="tax">Property tax</option><option value="insurance">Insurance</option><option value="hoa">HOA</option></select>
       <input id="pcYear" inputmode="numeric" placeholder="Year" value="${new Date().getFullYear() - 1}"><input id="pcAmt" inputmode="decimal" placeholder="Amount $">
       <input id="pcProv" placeholder="Insurer / county" style="width:140px"><button id="pcSave">Save</button><span class="sub" id="pcMsg"></span></div>
+    <div id="pRentD"></div>
     <div id="pUtil"></div>
     <h3>Statements</h3><div style="overflow:auto"><table class="tight"><tr><th>Date</th><th>Servicer</th><th>Balance</th><th>Rate</th><th>Payment</th><th>Principal</th><th>Interest</th><th>Escrow</th><th>Escrow bal.</th><th></th></tr>
       ${stm.map(s => `<tr><td>${longDay(s.statement_date)}</td><td>${escapeHtml(s.servicer || "")} ${escapeHtml(s.loan || "")}</td><td>${usd(s.balance, 2)}</td><td>${fmt(s.rate, 3)}%</td>
@@ -1296,7 +1305,7 @@ function renderDetail() {
     const r = await fetch("/api/properties/cost", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify({property_id: p.id,
       kind: $("pcKind").value, year: +$("pcYear").value, amount: $("pcAmt").value, provider: $("pcProv").value})}).then(r => r.json()).catch(() => ({ok: false}));
     $("pcMsg").textContent = r.ok ? "Saved" : (r.error || "Couldn't save"); if (r.ok) loadProps(); };
-  whatIf(p); loadPropBills(p);
+  whatIf(p); loadPropBills(p); loadRentDetail(p);
 }
 function whatIf(p) {
   p.current.forEach((l, i) => { const out = document.querySelector(`.pxout[data-i="${i}"]`), x = pExtra[l.loan] || 0; if (!out) return;
@@ -1320,6 +1329,7 @@ async function loadPropBills(p) {
 }
 function drawDetail() {
   const p = pSum && pSum.properties.find(x => x.id === pSel); if (!p) return;
+  drawRentDetail(p);
   if ($("pBalChart") && p.current.length) {
     const ser = [{l: "Statements", c: "var(--c1)", rows: p.history.filter(h => h.balance != null).map(h => ({ts: new Date(h.d + "T12:00").getTime() / 1000, v: h.balance}))}];
     let x1 = Date.now() / 1000;
@@ -1364,7 +1374,75 @@ function drawProps() {
     bars($(svgId), ys.map(y => { const v = {}; pSum.taxins.filter(t => t.year === y && t.kind === kind).forEach(t => v[String(t.property_id)] = t.amount);
       return {label: String(y), title: String(y), v}; }), used, {money: true, dec: 0, empty: "No amounts yet"});
   }
-  drawDetail();
+  drawRent(); drawDetail();
+}
+
+/* ---------- rent (property manager owner statements) ---------- */
+function rentWindow() {
+  const ms = pSum.rent.map(r => r.month).sort(), last = ms[ms.length - 1];
+  if (!last) return null;
+  const d = new Date(last + "-15T12:00"); d.setMonth(d.getMonth() - 11);
+  return {from: d.toISOString().slice(0, 7), to: last};
+}
+function rentStats(pid) {
+  const w = rentWindow(); if (!w) return null;
+  const rows = pSum.rent.filter(r => r.property_id === pid && r.month >= w.from && r.month <= w.to);
+  if (!rows.length) return null;
+  const sum = k => rows.reduce((a, r) => a + (r[k] || 0), 0);
+  // months actually covered by statements (a missing statement shouldn't look like a month with no rent)
+  const n = new Set(rows.filter(r => r.rent || r.mgmt).map(r => r.month)).size || 1;
+  const p = pSum.properties.find(x => x.id === pid), mort = p ? p.payment * n : 0;
+  const st = {rent: sum("rent"), other_in: sum("other_in"), mgmt: sum("mgmt"), repairs: sum("repairs"), utilities: sum("utilities"),
+    leasing: sum("leasing"), other_out: sum("other_out"), income: sum("income"), expenses: sum("expenses"), noi: sum("noi"), mort, n};
+  st.cash = st.noi - mort; st.cashMo = st.cash / n; st.rentMo = st.rent / n; return st;
+}
+function renderRent() {
+  const w = rentWindow(), P = pSum.properties;
+  if (!w) { $("pPerf").innerHTML = `<tr><td class="sub">No owner statements yet.</td></tr>`; $("pPerfWin").textContent = ""; return; }
+  $("pPerfWin").textContent = `12 months, ${monthYear(w.from)} – ${monthYear(w.to)}`;
+  const rows = P.map(p => ({p, s: rentStats(p.id)})).filter(x => x.s);
+  const tot = k => rows.reduce((a, x) => a + x.s[k], 0);
+  const cf = v => `<b class="${v < 0 ? "up" : "down"}">${usd(v)}</b>`;
+  $("pPerf").innerHTML = `<tr><th>Property</th><th>Rent</th><th>Other income</th><th>Mgmt fees</th><th>Repairs</th><th>Utilities</th><th>Leasing</th><th>Net operating</th><th>Mortgage</th><th>Cash flow</th><th>per month</th></tr>` +
+    rows.map(({p, s}) => `<tr><td>${escapeHtml(p.name)}</td><td>${usd(s.rent)}</td><td>${usd(s.other_in)}</td><td>${usd(s.mgmt)}</td><td>${usd(s.repairs)}</td><td>${usd(s.utilities)}</td><td>${usd(s.leasing)}</td>
+      <td><b>${usd(s.noi)}</b></td><td>${s.mort ? usd(s.mort) : "--"}</td><td>${cf(s.cash)}</td><td>${cf(s.cashMo)}${s.n < 12 ? ` <span class="sub">(${s.n} mo)</span>` : ""}</td></tr>`).join("") +
+    `<tr><td><b>All rentals</b></td><td><b>${usd(tot("rent"))}</b></td><td>${usd(tot("other_in"))}</td><td>${usd(tot("mgmt"))}</td><td>${usd(tot("repairs"))}</td><td>${usd(tot("utilities"))}</td><td>${usd(tot("leasing"))}</td>
+      <td><b>${usd(tot("noi"))}</b></td><td>${usd(tot("mort"))}</td><td>${cf(tot("cash"))}</td><td>${cf(tot("cashMo"))}</td></tr>`;
+}
+function drawRent() {
+  const P = pSum.properties, ys = [...new Set(pSum.rent.map(r => r.month.slice(0, 4)))].sort();
+  const used = P.map((p, i) => ({k: String(p.id), l: shortName(p.name), c: pColor(i)})).filter(s => pSum.rent.some(r => String(r.property_id) === s.k && r.rent));
+  $("pRentLeg").innerHTML = used.map(s => `<span><i class="sq" style="background:${s.c}"></i>${escapeHtml(s.l)}</span>`).join("");
+  bars($("pRentChart"), ys.map(y => { const v = {}; pSum.rent.filter(r => r.month.startsWith(y)).forEach(r => v[String(r.property_id)] = (v[String(r.property_id)] || 0) + (r.rent || 0));
+    const net = pSum.rent.filter(r => r.month.startsWith(y)).reduce((a, r) => a + r.noi, 0);
+    return {label: y, title: y, v, extra: `<br>Net operating income: <b>${usd(net)}</b>`}; }), used, {money: true, dec: 0, empty: "Rent appears once owner statements are added"});
+  const w = rentWindow(); $("pRentNow").textContent = w ? `${usd(P.reduce((a, p) => a + ((rentStats(p.id) || {}).rentMo || 0), 0))} a month lately` : "";
+}
+async function loadRentDetail(p) {
+  const el = $("pRentD"); if (!el) return;
+  const rows = pSum.rent.filter(r => r.property_id === p.id);
+  if (!rows.length) { el.innerHTML = ""; return; }
+  const s = rentStats(p.id);
+  el.innerHTML = `<h3>Rent &amp; expenses <span class="legend"><span><i style="background:var(--good)"></i>Income</span><span><i style="background:var(--critical)"></i>Expenses</span><span><i style="background:var(--c1)"></i>Net operating</span></span></h3>
+    ${s ? `<div class="meta" style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px;color:var(--ink-2)"><span>Last 12 months: rent <b style="color:var(--ink)">${usd(s.rent)}</b></span><span>expenses <b style="color:var(--ink)">${usd(s.expenses)}</b></span>
+      <span>net operating <b style="color:var(--ink)">${usd(s.noi)}</b></span><span>after mortgage <b class="${s.cash < 0 ? "up" : "down"}">${usd(s.cash)}</b> (${usd(s.cashMo)}/mo)</span>${s.n < 12 ? `<span>${s.n} months of statements</span>` : ""}</div>` : ""}
+    <svg class="viz" id="pRentD_chart" style="height:220px"></svg>
+    <details><summary class="sub" style="cursor:pointer;margin-top:6px">Expense and income lines</summary><div style="overflow:auto;max-height:420px"><table class="tight" id="pRentTx"><tr><td class="sub">Loading…</td></tr></table></div></details>`;
+  drawRentDetail(p);
+  let tx; try { tx = await j(`/api/properties/${p.id}/rent`); } catch (e) { return; }
+  const t = $("pRentTx"); if (!t) return;
+  const C = pSum.rent_cats, inc = ["rent", "other_in", "contrib", "deposit"];
+  t.innerHTML = `<tr><th>Date</th><th>Kind</th><th>Amount</th><th>Description</th></tr>` + tx.map(x => `<tr><td style="white-space:nowrap">${longDay(x.date)}</td><td>${C[x.category] || x.category}</td>
+    <td style="white-space:nowrap" class="${inc.includes(x.category) ? "" : "up"}">${inc.includes(x.category) ? "" : "−"}${usd(x.amount, 2)}</td><td>${escapeHtml(x.description)}</td></tr>`).join("");
+}
+function drawRentDetail(p) {
+  const svg = $("pRentD_chart"); if (!svg) return;
+  const rows = pSum.rent.filter(r => r.property_id === p.id).slice(-36), ts = m => new Date(m + "-15T12:00").getTime() / 1000;
+  if (!rows.length) return;
+  mchart(svg, [{l: "Income", c: "var(--good)", rows: rows.map(r => ({ts: ts(r.month), v: r.income}))},
+               {l: "Expenses", c: "var(--critical)", rows: rows.map(r => ({ts: ts(r.month), v: r.expenses}))},
+               {l: "Net operating", c: "var(--c1)", rows: rows.map(r => ({ts: ts(r.month), v: r.noi}))}],
+    {u: "", dec: 0, gap: 62 * 86400, points: true, zeroline: true, x0: ts(rows[0].month) - 20 * 86400, x1: ts(rows[rows.length - 1].month) + 20 * 86400, tlabel: t => new Date(t * 1000).toLocaleDateString([], {month: "long", year: "numeric"})});
 }
 function propForm(p) {
   $("pForm").hidden = false; $("pfMsg").textContent = "";

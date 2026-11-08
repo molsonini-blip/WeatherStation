@@ -22,4 +22,6 @@ robocopy "%P%\Refinance" "%PD%\_Statements Aug 2023" "*statment.pdf" "*statement
 robocopy "%P%\2403 Wilma Rudolph\Mortgage\Truist" "%PD%\2403 Wilma Rudolph Rd\Truist" *.pdf /S %O% /LOG+:"%LOG%"
 robocopy "%P%\11528 Rustic Rock\Statements" "%PD%\11528 Rustic Rock Dr\Statements" *.pdf /S %O% /LOG+:"%LOG%"
 robocopy "%P%\11528 Rustic Rock\Utilities" "%PD%\11528 Rustic Rock Dr\Utilities" *.pdf /S %O% /LOG+:"%LOG%"
+rem Presidio Group owner statements (rent and expenses); the refinancing folder (bank statements, paystubs) is left out
+robocopy "%P%\Presidio Group" "%PD%\_Presidio Group" *.pdf /S /XD "Refinancing 16609 Malaga Hills" %O% /LOG+:"%LOG%"
 echo ---- DONE >> "%LOG%"

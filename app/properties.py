@@ -40,6 +40,9 @@ CREATE TABLE IF NOT EXISTS loan_statements (id INTEGER PRIMARY KEY AUTOINCREMENT
   insurance_ytd REAL, file TEXT, status TEXT, source TEXT, notes TEXT, created INTEGER, edited INTEGER);
 CREATE TABLE IF NOT EXISTS escrow_items (id INTEGER PRIMARY KEY AUTOINCREMENT, property_id INTEGER, month TEXT, kind TEXT,
   description TEXT, amount REAL, estimate INTEGER, source_date TEXT, file TEXT, UNIQUE(property_id, month, kind));
+CREATE TABLE IF NOT EXISTS rent_tx (id INTEGER PRIMARY KEY AUTOINCREMENT, property_id INTEGER, date TEXT, category TEXT,
+  amount REAL, description TEXT, period_start TEXT, period_end TEXT, manager TEXT, file TEXT,
+  UNIQUE(property_id, date, category, amount, description));
 CREATE TABLE IF NOT EXISTS property_costs (id INTEGER PRIMARY KEY AUTOINCREMENT, property_id INTEGER, year INTEGER, kind TEXT,
   amount REAL, provider TEXT, notes TEXT, created INTEGER);
 """
@@ -111,6 +114,8 @@ def pdate(s):
 
 def kind_of(sq, path=""):
     p = path.lower()
+    if "ownerstatement" in sq and re.search(r"propertycashsummary|consolidatedsummary|presidio", sq):
+        return "owner"
     if re.search(r"utilit", p):
         return "bill"
     stmt = re.search(r"principalbalance", sq) and re.search(r"amountdue|regular(?:monthly)?payment", sq)
@@ -227,6 +232,74 @@ def statement_date_escrow(text):
     return pdate(m.group(1)) if m else None
 
 
+# ------------------------------------------------------------------------- property manager owner statement
+RENT_CATS = {"rent": "Rent", "other_in": "Other income", "mgmt": "Management fees", "repairs": "Repairs & maintenance",
+             "utilities": "Utilities", "leasing": "Leasing fees", "other_out": "Other expenses",
+             "owner": "Paid to you", "contrib": "Money you put in", "deposit": "Security deposits"}
+INCOME_CATS, EXPENSE_CATS = ("rent", "other_in"), ("mgmt", "repairs", "utilities", "leasing", "other_out")
+
+
+def tx_category(desc, incoming):
+    d = desc.lower()
+    if re.search(r"security deposit|security clearing|move out refund|deposit refund", d):
+        return "deposit"
+    if re.search(r"owner contribution|contribution of capital", d):
+        return "contrib"
+    if incoming:
+        return "rent" if re.search(r"rent/leasing income|rent income|prepaid rent|\brent\b", d) else "other_in"
+    if re.search(r"owner (?:draw|distribution|payment)|owner contribution", d):
+        return "owner"
+    if re.search(r"management fee", d):
+        return "mgmt"
+    if re.search(r"leasing fee|lease (?:fee|commission)|renewal fee|placement fee|lease renewal|leasing commission", d):
+        return "leasing"
+    if re.search(r"\bwater\b|waste ?water|trash|electric|\bgas\b|city of austin|pedernales|utilit|initiation service", d):
+        return "utilities"
+    if re.search(r"liability insurance|bank fee|postage|admin", d):
+        return "other_out"
+    return "repairs"
+
+
+def parse_owner_statement(text: str):
+    """Presidio-style owner statement -> (period_start, period_end, [(property number, street letters, date, category,
+    amount, description)]). Annual summaries return no period (they would double count the monthly ones)."""
+    low = text
+    m = (re.search(r"Owner Statement\s*\n?\s*([A-Z][a-z]{2} \d{1,2}, \d{4})\s*-\s*([A-Z][a-z]{2} \d{1,2}, \d{4})", low)
+         or re.search(r"([A-Z][a-z]{2} \d{1,2}, \d{4})\s*-\s*([A-Z][a-z]{2} \d{1,2}, \d{4})", low))
+    ps = pe = None
+    if m:
+        ps, pe = bills_mod.parse_date(m.group(1)), bills_mod.parse_date(m.group(2))
+    else:
+        m = re.search(r"Period:\s*(\d{1,2}) ([A-Z][a-z]{2}) (\d{4})\s*-\s*(\d{1,2}) ([A-Z][a-z]{2}) (\d{4})", low)
+        if m:
+            ps = bills_mod.parse_date(f"{m.group(2)} {m.group(1)} {m.group(3)}")
+            pe = bills_mod.parse_date(f"{m.group(5)} {m.group(4)} {m.group(6)}")
+    if not (ps and pe) or not 20 <= (date.fromisoformat(pe) - date.fromisoformat(ps)).days <= 45:
+        return ps, pe, []
+    heads = list(re.finditer(r"(?m)^([A-Z][A-Z'&. ]{2,}) - (\d{2,6})\s*\n?\s*(?:[NSEW]\.?\s+)?([A-Za-z]{4})", text))
+    out = []
+    for i, h in enumerate(heads):
+        sec = text[h.end(): heads[i + 1].start() if i + 1 < len(heads) else len(text)]
+        b = re.search(r"Beginning Cash Balance as of \d\d/\d\d/\d{4}\s+(-?[\d,]+\.\d{2})", sec)
+        if not b:
+            continue
+        bal = money(b.group(1))
+        body = sec[b.end(): sec.find("Ending Cash Balance", b.end()) if "Ending Cash Balance" in sec[b.end():] else len(sec)]
+        for chunk in re.split(r"\n(?=\d\d/\d\d/\d{4}\s)", "\n" + body):
+            dm = re.match(r"\s*(\d\d/\d\d/\d{4})\s", chunk)
+            nums = re.findall(r"(?<![\d.])-?[\d,]+\.\d{2}(?!\d)", chunk)
+            if not dm or len(nums) < 2:
+                continue
+            amt, nb = money(nums[-2]), money(nums[-1])
+            incoming = nb > bal - 0.005 if abs(abs(nb - bal) - amt) < 0.02 else nb >= bal
+            bal = nb
+            desc = re.sub(r"\s+", " ", chunk[dm.end():])
+            desc = desc[:desc.rfind(nums[-2])].strip() if nums[-2] in desc else desc
+            cat = tx_category(desc, incoming)
+            out.append((h.group(2), h.group(3).lower(), bills_mod.parse_date(dm.group(1)), cat, amt, desc[:200]))
+    return ps, pe, out
+
+
 # ------------------------------------------------------------------------------------------------- payoff maths
 def payoff(balance, rate, pi, extra=0.0):
     """Months left and total interest for a fixed-rate loan; None if the payment doesn't cover the interest."""
@@ -304,13 +377,15 @@ class Properties:
         """rel: path inside the Properties folder, e.g. '11528 Rustic Rock Dr/Mortgage/Sept 26.pdf'."""
         loop = asyncio.get_running_loop()
         try:
-            text = await loop.run_in_executor(None, bills_mod.pdf_text, data)
+            text = await loop.run_in_executor(None, bills_mod.pdf_text, data, 40)
         except Exception as e:
             log.warning("could not read %s: %s", rel, e)
             return None
         sq = squash(text)
         kind = kind_of(sq, rel)
         folder = rel.replace("\\", "/").split("/")[0] if "/" in rel.replace("\\", "/") else None
+        if kind == "owner":
+            return self.ingest_owner(text, rel, data)
         key = address_key(sq) if kind in ("statement", "escrow") else None
         fkey = key_from_name(folder)
         if not property_id:
@@ -319,6 +394,8 @@ class Properties:
             property_id = self.property_for(key or fkey, folder if folder and (same or not key) else None)
         if kind == "bill" or (kind is None and property_id and bills_mod.extract(text).get("utility")):
             return await self.mon.bills.ingest_pdf(rel, data, source, property_id=property_id)
+        if kind == "owner":
+            return self.ingest_owner(text, rel, data)
         if kind is None or not property_id:
             log.info("properties: skipping %s (not a mortgage statement, escrow analysis or bill)", rel)
             return None
@@ -347,6 +424,38 @@ class Properties:
             self.mon.log_event("properties", f"Escrow statement added: {self.name(property_id)} ({len(items)} tax/insurance payments)")
             self.mon.push("properties", {})
             return property_id
+
+    def ingest_owner(self, text, rel, data):
+        ps, pe, txs = parse_owner_statement(text)
+        if not txs:
+            log.info("properties: %s is an owner statement with no monthly transactions (annual summary?) - skipped", rel)
+            return None
+        mgr = "Presidio Group" if "presidio" in text.lower() else None
+        n = 0
+        for num, letters, d, cat, amt, desc in txs:
+            pid = self.property_for((num, letters))
+            cur = self.db.c.execute("INSERT OR IGNORE INTO rent_tx (property_id, date, category, amount, description, period_start, "
+                                    "period_end, manager, file) VALUES (?,?,?,?,?,?,?,?,?)",
+                                    (pid, d, cat, amt, desc, ps, pe, mgr, rel))
+            n += cur.rowcount
+        self.db.c.commit()
+        if n:
+            self.mon.log_event("properties", f"Owner statement {ps} to {pe}: {n} rent and expense lines")
+            self.mon.push("properties", {})
+        return n or None
+
+    def rentals(self):
+        """Per property per year and per month: rent, other income, expenses by kind, net operating income."""
+        rows = self.db.q("SELECT property_id, substr(date,1,7) m, category, SUM(amount) a FROM rent_tx GROUP BY property_id, m, category")
+        months = {}
+        for r in rows:
+            months.setdefault((r["property_id"], r["m"]), {})[r["category"]] = round(r["a"], 2)
+        out = []
+        for (pid, m), v in sorted(months.items()):
+            inc = sum(v.get(c, 0) for c in INCOME_CATS)
+            exp = sum(v.get(c, 0) for c in EXPENSE_CATS)
+            out.append(dict(property_id=pid, month=m, income=round(inc, 2), expenses=round(exp, 2), noi=round(inc - exp, 2), **v))
+        return out
 
     def store_escrow(self, pid, items, sdate, fname):
         for month, kind, desc, amt in items:
@@ -478,7 +587,7 @@ class Properties:
                             payment=sum(l["statement"]["payment"] or 0 for l in active),
                             history=[dict(d=s["statement_date"], loan=s["loan"], balance=s["balance"],
                                           escrow_balance=s["escrow_balance"]) for s in mine if s["statement_date"]]))
-        return dict(properties=out, taxins=self.taxins(), status=self.status,
+        return dict(properties=out, taxins=self.taxins(), status=self.status, rent=self.rentals(), rent_cats=RENT_CATS,
                     statements=self.db.q("SELECT s.*, p.name pname FROM loan_statements s LEFT JOIN properties p "
                                          "ON p.id=s.property_id ORDER BY statement_date DESC"))
 
@@ -583,6 +692,11 @@ def register(r, web, mon, props: Properties):
                 months[mth][b["utility"] or "other"] = round(months[mth][b["utility"] or "other"] + b["amount"], 2)
         return web.json_response(dict(bills=rows, monthly=[dict(month=k, v=v) for k, v in sorted(months.items())]))
 
+    async def rent_tx(req):
+        pid = int(req.match_info["id"])
+        return web.json_response(props.db.q("SELECT date, category, amount, description FROM rent_tx WHERE property_id=? "
+                                            "AND category NOT IN ('owner') ORDER BY date DESC LIMIT 400", (pid,)))
+
     async def stmt_pdf(req):
         row = props.db.q("SELECT file FROM loan_statements WHERE id=?", (int(req.match_info["id"]),))
         path = (props.dir / (row[0]["file"] if row and row[0]["file"] else "x")).resolve()
@@ -610,5 +724,6 @@ def register(r, web, mon, props: Properties):
     r.add_get("/api/properties/statement/{id}/pdf", stmt_pdf)
     r.add_post("/api/properties/cost", save_cost)
     r.add_get("/api/properties/{id}/bills", bills_for)
+    r.add_get("/api/properties/{id}/rent", rent_tx)
     r.add_post("/api/properties/scan", scan)
     r.add_post("/api/properties/reparse", reparse)

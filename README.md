@@ -188,6 +188,10 @@ The homestead, residential rentals and commercial properties: mortgages, escrow,
   property, **Extra principal** shows the new payoff date and interest saved.
 - **Taxes & insurance trend:** per property per year, from escrow statements, the statements' year-to-date
   disbursements, or what you enter (entries win). Year-over-year change is shown; "est." = servicer projection.
+- **Rent & cash flow:** property-manager owner statements (Presidio Group layout, 2012 on) are read into rent, other
+  income, management fees, repairs, utilities and leasing fees per property. Rental performance shows the last 12 months:
+  net operating income and cash flow after the mortgage payment. Security deposits, owner contributions and payouts to
+  you are kept out of income and expenses; annual summaries are skipped so nothing is counted twice.
 - `PROPERTIES` in `.env` lists properties to show before any statement arrives (commercial, paid off, vacant).
 
 ## Sprinklers tab (`#sprinklers`, Rachio)
