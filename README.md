@@ -114,8 +114,8 @@ Or set `HAIL_SHIELD_ON_URL` / `HAIL_SHIELD_OFF_URL` to call Home Assistant or th
 The dashboard has a **YoLink** tab (`http://<server>:8088/#yolink`). With `YOLINK_UAID` / `YOLINK_SECRET` set, the monitor
 finds every YoLink temperature/humidity sensor on your account and reads each one every `YOLINK_POLL_MIN` (5) minutes.
 The tab shows a card per sensor (temperature, humidity, 24 h low/high, battery, last report, YoLink alarms like
-"Too hot" or "Low battery"), temperature and humidity charts for all sensors with the Tempest outdoor reading as a dashed
-reference, and a sensor table. History is kept in the same database. New sensors are picked up every 6 hours, or right away
+"Too hot" or "Low battery"). Click a card to expand its history: 24 h by default, or 3 days, 7 days and 30 days, with
+the Tempest outdoor temperature as a dashed reference. There's also a sensor table. History is kept in the same database. New sensors are picked up every 6 hours, or right away
 with **Find new sensors**.
 
 ## Hail camera (Reolink + AI measurement)
@@ -159,7 +159,7 @@ In testing on synthetic frames the sizes came out within about 1–2 mm.
 These endpoints are useful for Home Assistant, Grafana, or your LLM stack:
 
 `/api/state` · `/api/history?hours=24` · `/api/rapid?minutes=30` · `/api/strikes?hours=24` ·
-`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/wind_rose?hours=24` · `/api/yolink/sensors` · `/api/yolink/history?hours=24` · `/api/hailcam` · `/api/hailcam/image` · `POST /api/hailcam/test` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
+`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/wind_rose?hours=24` · `/api/yolink/sensors` · `/api/yolink/history?hours=24&device=<id>` · `/api/hailcam` · `/api/hailcam/image` · `POST /api/hailcam/test` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
 `POST /api/test-ifttt`
 
 ## Notes

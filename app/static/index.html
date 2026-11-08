@@ -111,7 +111,18 @@ td.n,th.n{text-align:right}
 .tabs a{padding:6px 12px;border-radius:8px;color:var(--ink-2);text-decoration:none;font-weight:600}
 .tabs a[aria-current="page"]{background:var(--ink);color:var(--surface)}
 main[hidden]{display:none}
-.ylcards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));grid-column:span 12}
+.ylcards{display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));grid-column:span 12}
+.ylc .top{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap}.ylc .hum{font-size:22px;color:var(--ink);margin-bottom:6px}.ylc .hum small{font-size:13px;color:var(--ink-2)}
+.ylc h3{font-size:11px;font-weight:600;color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em;margin:12px 0 2px;display:flex;gap:10px;align-items:center}
+.ylc h3 .legend{text-transform:none;letter-spacing:0;font-weight:400}
+.ylc svg.viz{height:200px}.ylc svg.viz.h{height:140px}
+.ylc{cursor:pointer;transition:box-shadow .15s}.ylc:hover{box-shadow:inset 0 0 0 1px var(--ink-3)}
+.ylc:focus-visible{outline:2px solid var(--s1);outline-offset:2px}
+.ylc .more{margin-top:8px;font-size:12.5px;color:var(--s1);font-weight:600}
+.ylc.open{grid-column:1/-1;cursor:default}.ylc.open:hover{box-shadow:inset 0 0 0 1px var(--ring)}
+.ylc .ylhist{display:none}.ylc.open .ylhist{display:block}
+.ylc .hhead{display:flex;align-items:center;gap:8px;margin-top:12px;flex-wrap:wrap}
+.ylc .stats3{display:flex;flex-wrap:wrap;gap:4px 16px;font-size:12.5px;color:var(--ink-2);margin-top:6px}
 .ylc .nm{display:flex;align-items:center;gap:8px;font-weight:600;min-width:0}.ylc .nm span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ylc .sw{width:10px;height:10px;border-radius:3px;flex:none}
 .ylc .tv{font-size:34px;font-weight:400;letter-spacing:-.02em;margin:6px 0 2px}.ylc .tv small{font-size:16px;color:var(--ink-2)}
@@ -222,8 +233,6 @@ main[hidden]{display:none}
     <div class="grid">
       <div class="notice card" id="ylNotice" style="display:none"></div>
       <div class="ylcards" id="ylCards"></div>
-      <section class="card chart wide"><div class="head"><h2>Temperature</h2><span class="legend" id="ylLegT"></span></div><svg class="viz" id="ylT" style="height:220px"></svg></section>
-      <section class="card chart wide"><div class="head"><h2>Humidity</h2><span class="legend" id="ylLegH"></span></div><svg class="viz" id="ylH" style="height:220px"></svg></section>
       <section class="card" style="grid-column:span 12"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h2 style="margin:0">Sensors</h2><span style="flex:1"></span><button id="ylRefresh">Find new sensors</button></div>
         <div style="overflow:auto"><table id="ylTable"></table></div></section>
     </div>
@@ -547,7 +556,7 @@ function connect() {
   es.addEventListener("strike", e => { strikes.push(JSON.parse(e.data)); drawAll(); });
   es.addEventListener("mode", e => { renderState(JSON.parse(e.data)); loadHistory(); loadLists(); });
   es.addEventListener("event", () => loadLists());
-  es.addEventListener("yolink", e => { ylSnap = JSON.parse(e.data); if (page === "yolink") { renderYolinkCards(); loadYolink(); } });
+  es.addEventListener("yolink", e => { if (page === "yolink") loadYolink(); });
   es.addEventListener("hailcam", e => { state.hailcam = JSON.parse(e.data); renderHailcam(state.hailcam); });
   es.addEventListener("shield", e => { renderShield(JSON.parse(e.data)); loadLists(); });
   es.addEventListener("hail", () => { $("rainD").textContent = "⚠ Hail detected"; loadLists(); });
@@ -569,12 +578,13 @@ addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTim
   setTimeout(tick, document.body.classList.contains("live") ? 30000 : 300000);
 })();
 /* ---------- pages: Weather / YoLink ---------- */
-let page = "weather", ylSnap = null, ylHist = null;
+let page = "weather", ylSnap = null;
 function showPage() {
   page = location.hash === "#yolink" ? "yolink" : "weather";
   $("pgWeather").hidden = page !== "weather"; $("pgYolink").hidden = page !== "yolink";
   document.querySelectorAll(".tabs a").forEach(a => a.dataset.pg === page ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
   $("badge").style.display = page === "weather" ? "" : "none";
+  $("range").style.display = page === "weather" ? "" : "none";
   if (page === "yolink") loadYolink(); else drawAll();
 }
 addEventListener("hashchange", showPage);
@@ -625,6 +635,7 @@ function mchart(svg, list, opt = {}) {
 const ylColor = i => i < 8 ? `var(--c${i + 1})` : "var(--ink-3)";
 const battery = b => b == null ? "" : `<span class="bat${b <= 1 ? " low" : ""}" title="Battery ${b}/4">${[1, 2, 3, 4].map(k => `<i class="${k <= b ? "f" : ""}"></i>`).join("")}</span>`;
 const ALARM = {lowBattery: ["crit", "Low battery"], lowTemp: ["warn", "Too cold"], highTemp: ["warn", "Too hot"], lowHumidity: ["warn", "Too dry"], highHumidity: ["warn", "Too humid"]};
+const ylOpen = {};  // sensor id -> hours shown in its expanded history
 function renderYolinkCards() {
   const s = ylSnap; if (!s) return;
   const n = $("ylNotice");
@@ -633,30 +644,57 @@ function renderYolinkCards() {
   else if (!s.sensors.length) { n.style.display = ""; n.textContent = "Waiting for the first readings from your YoLink temperature/humidity sensors…"; }
   else n.style.display = "none";
   const o = s.outdoor;
-  let h = `<div class="card ylc out"><div class="nm"><span class="sw" style="background:var(--ink-3)"></span><span>Outdoor (Tempest)</span></div>
-    <div class="tv">${fmt(o.temp_f, 1)}<small>°F</small></div><div class="meta"><span>${fmt(o.humidity)}% humidity</span><span>live</span></div></div>`;
-  h += s.sensors.map((x, i) => `<div class="card ylc"><div class="nm"><span class="sw" style="background:${ylColor(i)}"></span><span title="${escapeHtml(x.name)}">${escapeHtml(x.name)}</span>
-      ${x.online === false ? `<span class="pill crit">Offline</span>` : ""}</div>
-    <div class="tv">${fmt(x.temp_f, 1)}<small>°F</small></div>
-    <div class="meta"><span>${fmt(x.humidity)}% humidity</span><span>24h ${fmt(x.lo24_f)}–${fmt(x.hi24_f)}°</span><span>${battery(x.battery)}</span><span>${x.ts ? ago(x.ts) : ""}</span></div>
-    ${(x.alarm || []).filter(a => ALARM[a]).map(a => `<span class="pill ${ALARM[a][0]}" style="margin-top:6px">${ALARM[a][1]}</span>`).join(" ")}</div>`).join("");
+  const card = (id, name, x) => { const open = id in ylOpen, hrs = ylOpen[id] || 24;
+    return `<div class="card ylc${id === "out" ? " out" : ""}${open ? " open" : ""}" data-id="${id}" role="button" tabindex="0" aria-expanded="${open}">
+    <div class="nm"><span title="${escapeHtml(name)}">${escapeHtml(name)}</span>${x.badge || ""}</div>
+    <div class="top"><div class="tv">${fmt(x.temp_f, 1)}<small>°F</small></div><div class="hum">${fmt(x.humidity)}<small>% humidity</small></div></div>
+    <div class="meta">${x.meta || ""}</div>${x.pills || ""}
+    <div class="more">${open ? "▾ Hide history" : "▸ Show history"}</div>
+    <div class="ylhist">${open ? `
+      <div class="hhead"><div class="seg ylr">${[[24, "24h"], [72, "3d"], [168, "7d"], [720, "30d"]].map(([h, l]) => `<button data-h="${h}" aria-pressed="${h === hrs}">${l}</button>`).join("")}</div>
+        <span class="stats3" id="ylS-${id}"></span></div>
+      <h3>Temperature °F <span class="legend"><span><i style="background:var(--s1)"></i>${id === "out" ? "Outdoor" : escapeHtml(name)}</span>${id === "out" ? "" : `<span><i style="background:var(--ink-3)"></i>Outdoor</span>`}</span></h3>
+      <svg class="viz" id="ylT-${id}"></svg>
+      <h3>Humidity %</h3><svg class="viz h" id="ylH-${id}"></svg>` : ""}</div></div>`; };
+  let h = s.sensors.map(x => card(x.id, x.name, Object.assign({}, x, {
+      badge: x.online === false ? ` <span class="pill crit">Offline</span>` : "",
+      meta: `<span>24h ${fmt(x.lo24_f, 1)}°–${fmt(x.hi24_f, 1)}°</span><span>${battery(x.battery)}</span><span>${x.ts ? ago(x.ts) : ""}</span>`,
+      pills: (x.alarm || []).filter(a => ALARM[a]).map(a => `<span class="pill ${ALARM[a][0]}" style="margin-top:6px">${ALARM[a][1]}</span>`).join(" ")}))).join("");
+  h += card("out", "Outdoor (Tempest)", {temp_f: o.temp_f, humidity: o.humidity, meta: "<span>live</span>"});
   $("ylCards").innerHTML = h;
+  Object.keys(ylOpen).forEach(drawCardHistory);
   $("ylTable").innerHTML = `<tr><th>Sensor</th><th>Model</th><th class="n">Temp</th><th class="n">Humidity</th><th class="n">24h low / high</th><th class="n">Battery</th><th class="n">Last report</th></tr>` +
     s.sensors.map(x => `<tr><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.model || "")}</td><td class="n">${fmt(x.temp_f, 1)}°F</td><td class="n">${fmt(x.humidity)}%</td><td class="n">${fmt(x.lo24_f, 1)}° / ${fmt(x.hi24_f, 1)}°</td><td class="n">${x.battery ?? "--"}/4</td><td class="n">${x.ts ? dtstr(x.ts) : "--"}</td></tr>`).join("");
 }
-function drawYolink() {
-  if (!ylSnap || !ylHist) return;
-  const now = Date.now() / 1000, x0 = now - hours * 3600;
-  const series = k => [{l: "Outdoor", c: "var(--ink-3)", dash: "4 3", w: 1.5, rows: ylHist.outdoor.map(r => ({ts: r.ts, v: r[k]}))}]
-    .concat(ylSnap.sensors.map((x, i) => ({l: x.name, c: ylColor(i), rows: (ylHist.series[x.id] || []).map(r => ({ts: r.ts, v: r[k]}))})));
-  const leg = `<span><i style="background:var(--ink-3)"></i>Outdoor</span>` + ylSnap.sensors.map((x, i) => `<span><i style="background:${ylColor(i)}"></i>${escapeHtml(x.name)}</span>`).join("");
-  $("ylLegT").innerHTML = $("ylLegH").innerHTML = leg;
-  mchart($("ylT"), series("temp_f"), {u: "°F", x0, x1: now, span: 10});
-  mchart($("ylH"), series("humidity"), {u: "%", x0, x1: now, span: 20, dec: 0});
+async function drawCardHistory(id) {
+  const hrs = ylOpen[id] || 24, d = await j(`/api/yolink/history?hours=${hrs}&device=${encodeURIComponent(id)}`).catch(() => null);
+  if (!d || !$("ylT-" + id) || ylOpen[id] !== hrs) return;
+  const now = Date.now() / 1000, x0 = now - hrs * 3600, gap = hrs > 168 ? 6 * 3600 : 3 * 3600;
+  const pts = (rows, k) => rows.map(r => ({ts: r.ts, v: r[k]}));
+  const mine = id === "out" ? d.outdoor : (d.series[id] || []);
+  const t = [{l: id === "out" ? "Outdoor" : "This sensor", c: "var(--s1)", rows: pts(mine, "temp_f")}];
+  if (id !== "out") t.unshift({l: "Outdoor", c: "var(--ink-3)", dash: "4 3", w: 1.5, rows: pts(d.outdoor, "temp_f")});
+  mchart($("ylT-" + id), t, {u: "°F", x0, x1: now, span: 6, gap});
+  mchart($("ylH-" + id), [{l: "Humidity", c: "var(--s1)", rows: pts(mine, "humidity")}], {u: "%", x0, x1: now, span: 10, dec: 0, gap});
+  const tv = mine.map(r => r.temp_f).filter(v => v != null), hv = mine.map(r => r.humidity).filter(v => v != null);
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length, lab = {24: "24 h", 72: "3 days", 168: "7 days", 720: "30 days"}[hrs];
+  $("ylS-" + id).innerHTML = tv.length ? `<span>${lab}: low <b>${fmt(Math.min(...tv), 1)}°</b></span><span>high <b>${fmt(Math.max(...tv), 1)}°</b></span><span>avg <b>${fmt(avg(tv), 1)}°</b></span>` +
+    (hv.length ? `<span>humidity ${fmt(Math.min(...hv))}–${fmt(Math.max(...hv))}%</span>` : "") : "<span>No history yet</span>";
 }
+$("ylCards").addEventListener("click", e => {
+  const c = e.target.closest(".ylc"); if (!c) return; const id = c.dataset.id;
+  const rb = e.target.closest(".ylr button");
+  if (rb) { ylOpen[id] = +rb.dataset.h; c.querySelectorAll(".ylr button").forEach(b => b.setAttribute("aria-pressed", b === rb)); drawCardHistory(id); return; }
+  if (c.classList.contains("open") && !e.target.closest(".more, .nm, .top")) return;  // clicks inside the charts don't collapse
+  if (id in ylOpen) delete ylOpen[id]; else ylOpen[id] = 24;
+  renderYolinkCards();
+  if (id in ylOpen) $("ylCards").querySelector(`[data-id="${CSS.escape(id)}"]`).scrollIntoView({block: "nearest", behavior: "smooth"});
+});
+$("ylCards").addEventListener("keydown", e => { if ((e.key === "Enter" || e.key === " ") && e.target.classList.contains("ylc")) { e.preventDefault(); e.target.click(); } });
+function drawYolink() { Object.keys(ylOpen).forEach(drawCardHistory); }
 async function loadYolink() {
-  try { [ylSnap, ylHist] = await Promise.all([j("/api/yolink/sensors"), j(`/api/yolink/history?hours=${hours}`)]); } catch (e) { return; }
-  renderYolinkCards(); drawYolink();
+  try { ylSnap = await j("/api/yolink/sensors"); } catch (e) { return; }
+  renderYolinkCards();
 }
 $("ylRefresh").onclick = async () => { $("ylRefresh").textContent = "Searching…";
   const r = await fetch("/api/yolink/refresh", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));

@@ -1347,7 +1347,9 @@ def build_app(mon: Monitor):
     async def yl_history(req):
         hours = min(float(req.query.get("hours", 24)), 24 * 31)
         since = mon.since(hours * 3600)
-        rows = mon.db.q("SELECT ts, device, temp_c, humidity FROM yl_th WHERE ts>=? ORDER BY ts", (since,))
+        dev = req.query.get("device")
+        rows = mon.db.q("SELECT ts, device, temp_c, humidity FROM yl_th WHERE ts>=? AND (? IS NULL OR device=?) ORDER BY ts",
+                        (since, dev, dev)) if dev != "out" else []
         series = {}
         for x in rows:
             series.setdefault(x["device"], []).append(dict(ts=x["ts"], temp_f=c_to_f(x["temp_c"]), humidity=x["humidity"]))
