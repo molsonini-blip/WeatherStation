@@ -296,10 +296,14 @@ button.danger{box-shadow:inset 0 0 0 1px var(--critical);color:var(--critical)}
         <label>Period start<input id="bfStart" type="date"></label>
         <label>Period end<input id="bfEnd" type="date"></label>
         <label>Due date<input id="bfDue" type="date"></label>
+        <label>Budget amount ($/mo)<input id="bfBudget" inputmode="decimal" placeholder="if on budget billing"></label>
+        <label>Running balance ($)<input id="bfBal" inputmode="decimal" placeholder="negative = credit"></label>
         <div class="btnrow"><button class="primary" id="bfSave">Save bill</button><button id="bfCancel">Cancel</button><span class="sub" id="bfMsg"></span></div>
       </section>
       <div class="bcards" id="bCards"></div>
       <section class="card chart wide"><div class="head"><h2>Monthly cost</h2><span class="legend" id="bLeg"></span><span class="now" id="bTotal"></span></div><svg class="viz" id="bChart" style="height:240px"></svg></section>
+      <section class="card chart wide" id="bBalCard" hidden><div class="head"><h2>Budget billing balance</h2><span class="legend" id="bBalLeg"></span></div>
+        <svg class="viz" id="bBal" style="height:200px"></svg><div class="sub">Above zero: actual charges have run ahead of the budget payments (you owe the difference). Below zero: credit.</div></section>
       <section class="card chart"><div class="head"><h2>Electricity per day · Smart Meter Texas</h2><span class="now" id="smtNow"></span></div><svg class="viz" id="smtChart"></svg><div class="sub" id="smtNote"></div></section>
       <section class="card chart"><div class="head"><h2>Outdoor average temperature</h2></div><svg class="viz" id="smtTemp"></svg><div class="sub">Same days as the electricity chart, from your Tempest.</div></section>
       <section class="card" style="grid-column:span 12"><h2>All bills</h2><div style="overflow:auto"><table id="bTable"></table></div></section>
@@ -699,7 +703,8 @@ function mchart(svg, list, opt = {}) {
   list.forEach(s => { let d = "", prev = null;
     s.rows.forEach(r => { if (r.v == null) return; const brk = prev == null || r.ts - prev > (opt.gap || 3 * 3600);
       d += `${brk ? "M" : "L"}${X(r.ts).toFixed(1)},${Y(r.v).toFixed(1)}`; prev = r.ts; });
-    g += `<path d="${d}" fill="none" stroke="${s.c}" stroke-width="${s.w || 2}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""} stroke-linejoin="round" stroke-linecap="round"/>`; });
+    g += `<path d="${d}" fill="none" stroke="${s.c}" stroke-width="${s.w || 2}" ${s.dash ? `stroke-dasharray="${s.dash}"` : ""} stroke-linejoin="round" stroke-linecap="round"/>`;
+    if (opt.points) s.rows.forEach(r => { if (r.v != null) g += `<circle cx="${X(r.ts).toFixed(1)}" cy="${Y(r.v).toFixed(1)}" r="3.5" fill="${s.c}" stroke="var(--surface)" stroke-width="1.5"/>`; }); });
   g += `<line class="xh" y1="${T}" y2="${H - B}" stroke="var(--ink-3)" stroke-dasharray="3 3" style="display:none"/>`;
   list.forEach((s, i) => g += `<circle class="hp hp${i}" r="4" fill="${s.c}" stroke="var(--surface)" stroke-width="2" style="display:none"/>`);
   g += `<rect x="${L}" y="0" width="${W - L - R}" height="${H}" fill="transparent"/>`;
@@ -938,13 +943,15 @@ async function loadBills() {
   $("bInbox").textContent = st.inbox ? `Drop PDFs in ${st.inbox.replace(/\//g, "\\")}` + (st.error ? ` · ⚠ ${st.error}` : st.last_scan ? ` · checked ${ago(st.last_scan)}` : "") : "No bills folder set";
   renderBillCards(); renderBillTable(); drawBills();
 }
+const bal = v => v == null ? "" : Math.abs(v) < .005 ? "even" : v < 0 ? `<span class="down">$${fmt(-v, 2)} credit</span>` : `<span class="up">$${fmt(v, 2)} owed</span>`;
 function renderBillCards() {
   const L = bSum.latest, pct = (a, b) => a == null || !b ? "" : (() => { const d = (a - b) / b * 100; return `<span class="${d > 1 ? "up" : d < -1 ? "down" : ""}">${d > 0 ? "▲" : d < 0 ? "▼" : ""} ${fmt(Math.abs(d))}%</span>`; })();
   $("bCards").innerHTML = Object.keys(UTIL).map(u => { const x = L[u];
     if (!x) return `<div class="card bc"><h2>${UTIL[u][0]}</h2><div class="amt" style="color:var(--ink-3)">--</div><div class="meta"><span>No bills yet</span></div></div>`;
     const c = x.cur;
     return `<div class="card bc"><h2>${UTIL[u][0]}${c.provider ? ` · ${escapeHtml(c.provider)}` : ""}</h2>
-      <div class="amt">$${fmt(c.amount, 2)}</div>
+      <div class="amt">$${fmt(c.amount, 2)}${c.budget_amount != null ? ` <small class="sub" style="font-size:13px">actual</small>` : ""}</div>
+      ${c.budget_amount != null ? `<div class="meta" style="margin-bottom:4px"><span>Budget <b style="color:var(--ink)">$${fmt(c.budget_amount, 2)}</b>/mo</span><span>Balance <b>${bal(c.budget_balance)}</b></span></div>` : ""}
       <div class="meta"><span>${c.period_start ? shortDay(c.period_start) + " – " : ""}${c.period_end ? shortDay(c.period_end) : ""}</span>${c.usage != null ? `<span>${fmt(c.usage)} ${escapeHtml(c.unit || "")}</span>` : ""}</div>
       <div class="meta" style="margin-top:4px">${x.prev_amount != null ? `<span>vs last bill ${pct(c.amount, x.prev_amount)}</span>` : ""}${x.ly_amount != null ? `<span>vs last year ${pct(c.amount, x.ly_amount)}</span>` : ""}
       ${u === "electric" && c.usage ? `<span>${fmt(c.amount / c.usage * 100, 1)}¢/kWh</span>` : ""}</div>
@@ -956,15 +963,16 @@ function renderBillCards() {
 let bShowAll = false;
 function renderBillTable() {
   const all = bSum.bills, B = bShowAll ? all : all.slice(0, 16);
-  $("bTable").innerHTML = `<tr><th>Bill</th><th>Provider</th><th>Period</th><th class="n">Amount</th><th class="n">Usage</th><th class="n">Rate</th><th>Status</th><th></th></tr>` +
+  $("bTable").innerHTML = `<tr><th>Bill</th><th>Provider</th><th>Period</th><th class="n">Actual</th><th class="n">Budget</th><th class="n">Running balance</th><th class="n">Usage</th><th class="n">Rate</th><th>Status</th><th></th></tr>` +
     (B.length ? B.map(b => `<tr><td>${UTIL[b.utility] ? UTIL[b.utility][0] : "?"}</td><td>${escapeHtml(b.provider || "")}</td>
       <td>${b.period_start ? shortDay(b.period_start) + " – " : ""}${b.period_end ? shortDay(b.period_end) + ", " + b.period_end.slice(0, 4) : ""}</td>
-      <td class="n">${b.amount != null ? "$" + fmt(b.amount, 2) : "--"}</td><td class="n">${b.usage != null ? fmt(b.usage) + " " + escapeHtml(b.unit || "") : ""}</td>
+      <td class="n">${b.amount != null ? "$" + fmt(b.amount, 2) : "--"}</td><td class="n">${b.budget_amount != null ? "$" + fmt(b.budget_amount, 2) : ""}</td>
+      <td class="n" title="${b.balance_source === "calculated" ? "Calculated from actual minus budget" : b.budget_balance != null ? "As shown on the bill" : ""}">${bal(b.budget_balance)}${b.balance_source === "calculated" ? "*" : ""}</td><td class="n">${b.usage != null ? fmt(b.usage) + " " + escapeHtml(b.unit || "") : ""}</td>
       <td class="n">${b.amount && b.usage ? (b.utility === "electric" ? fmt(b.amount / b.usage * 100, 1) + "¢/kWh" : b.utility === "water" ? "$" + fmt(b.amount / b.usage * 1000, 2) + "/kgal" : "$" + fmt(b.amount / b.usage, 2) + "/" + escapeHtml(b.unit || "")) : ""}</td>
       <td>${b.status === "review" ? `<span class="pill warn">Needs review</span>` : `<span class="sub">${b.source === "manual" ? "Entered" : "Read from PDF"}</span>`}</td>
       <td class="btnrow" style="flex-wrap:nowrap">${b.file ? `<a href="/api/bills/${b.id}/pdf" target="_blank" rel="noopener" style="color:var(--s1)">PDF</a>` : ""}<button data-edit="${b.id}">Edit</button><button data-del="${b.id}">Delete</button></td></tr>`).join("")
-      : `<tr><td colspan="8" class="empty">No bills yet. Upload a PDF, drop it in the bills folder, or add one by hand.</td></tr>`) +
-    (all.length > 16 ? `<tr><td colspan="8"><button id="bMore">${bShowAll ? "Show recent only" : `Show all ${all.length} bills`}</button></td></tr>` : "");
+      : `<tr><td colspan="10" class="empty">No bills yet. Upload a PDF, drop it in the bills folder, or add one by hand.</td></tr>`) +
+    (all.length > 16 ? `<tr><td colspan="10"><button id="bMore">${bShowAll ? "Show recent only" : `Show all ${all.length} bills`}</button></td></tr>` : "");
 }
 function drawBills() {
   if (!bMon) return;
@@ -977,6 +985,14 @@ function drawBills() {
       extra: w ? `<br>Avg outdoor ${fmt(w.t_avg)}°F · cooling ${fmt(w.cdd)} / heating ${fmt(w.hdd)} degree-days` : ""}; }),
     stacks, {money: true, dec: 2, empty: "Monthly totals appear once bills are added"});
   const last = months[months.length - 1]; $("bTotal").textContent = last ? `${monthLabel(last)}: $${fmt(Object.values(by[last] || {}).reduce((a, b) => a + (b || 0), 0), 2)}` : "";
+  const bb = (bSum ? bSum.bills : []).filter(b => b.budget_balance != null && b.period_end), bu = [...new Set(bb.map(b => b.utility))];
+  $("bBalCard").hidden = !bb.length;
+  if (bb.length) {
+    const ser = bu.map(u => ({l: UTIL[u][0], c: UTIL[u][1], rows: bb.filter(b => b.utility === u).map(b => ({ts: new Date(b.period_end + "T12:00").getTime() / 1000, v: b.budget_balance})).sort((a, c) => a.ts - c.ts)}));
+    const t0 = Math.min(...ser.flatMap(x => x.rows.map(r => r.ts)));
+    $("bBalLeg").innerHTML = ser.map(x => `<span><i style="background:${x.c}"></i>${x.l}</span>`).join("");
+    mchart($("bBal"), ser, {u: "", x0: t0 - 86400 * 10, x1: Date.now() / 1000, span: 50, dec: 2, gap: 70 * 86400, zeroline: true, points: true});
+  }
   const st = (bSum && bSum.status.smt) || null;
   $("smtNote").textContent = smt.length ? "Daily totals from your meter's 15-minute readings (usually a day or two behind)." :
     st && !st.ok ? `Smart Meter Texas: ${st.error}` : "Add SMT_USERNAME and SMT_PASSWORD (your smartmetertexas.com login) to the settings file to see daily electricity use here.";
@@ -990,6 +1006,7 @@ function billForm(b) {
   $("bForm").hidden = false; $("bfMsg").textContent = "";
   $("bfId").value = b ? b.id : ""; $("bfUtility").value = (b && b.utility) || "electric"; $("bfProvider").value = (b && b.provider) || "";
   $("bfAmount").value = b && b.amount != null ? b.amount : ""; $("bfUsage").value = b && b.usage != null ? b.usage : ""; $("bfUnit").value = (b && b.unit) || "";
+  $("bfBudget").value = b && b.budget_amount != null ? b.budget_amount : ""; $("bfBal").value = b && b.budget_balance != null && b.balance_source !== "calculated" ? b.budget_balance : "";
   $("bfStart").value = (b && b.period_start) || ""; $("bfEnd").value = (b && b.period_end) || ""; $("bfDue").value = (b && b.due_date) || "";
   $("bForm").scrollIntoView({block: "nearest", behavior: "smooth"});
 }
@@ -997,7 +1014,7 @@ $("bAddBtn").onclick = () => billForm(null);
 $("bfCancel").onclick = () => { $("bForm").hidden = true; };
 $("bfSave").onclick = async () => {
   const body = {id: $("bfId").value || null, utility: $("bfUtility").value, provider: $("bfProvider").value, amount: $("bfAmount").value, usage: $("bfUsage").value,
-    unit: $("bfUnit").value, period_start: $("bfStart").value || null, period_end: $("bfEnd").value || null, due_date: $("bfDue").value || null};
+    unit: $("bfUnit").value, budget_amount: $("bfBudget").value, budget_balance: $("bfBal").value, period_start: $("bfStart").value || null, period_end: $("bfEnd").value || null, due_date: $("bfDue").value || null};
   const r = await fetch("/api/bills/save", {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(body)}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
   if (!r.ok) { $("bfMsg").textContent = r.error || "Couldn't save"; return; }
   $("bForm").hidden = true; loadBills();

@@ -105,7 +105,8 @@ def extract(text: str) -> dict:
     t = re.sub(r"[ \t]+", " ", text)
     low = t.lower()
     out = dict(utility=None, provider=None, amount=None, usage=None, unit=None,
-               period_start=None, period_end=None, bill_date=None, due_date=None)
+               period_start=None, period_end=None, bill_date=None, due_date=None,
+               budget_amount=None, budget_balance=None)
     for pat, name, util in PROVIDERS:
         if re.search(pat, low):
             out["utility"] = out["utility"] or util
@@ -171,6 +172,19 @@ def extract(text: str) -> dict:
     if u == "internet":
         out["unit"] = ""
 
+    # budget / average monthly billing: the fixed monthly amount and the running balance
+    # (balance > 0 = actual charges ran ahead of the payments, you owe it; < 0 = credit)
+    m = re.search(r"(?:monthly budget (?:bill )?amount|average monthly billing\*? amount:?)\s*\$?\s*([\d,]+\.\d{2})", low)
+    if m:
+        out["budget_amount"] = money(m.group(1))
+    m = re.search(r"total budget balance\s*\$?\s*(-?[\d,]+\.\d{2})", low)
+    if m:
+        out["budget_balance"] = money(m.group(1))
+    m = re.search(r"cumulative balance total:?\s*\$?\s*(-?[\d,]+\.\d{2})\s*(cr)?", low)
+    if m:
+        v = money(m.group(1))
+        out["budget_balance"] = -abs(v) if m.group(2) else v
+
     # dates: billing period, most specific layout first
     SEP = r"\s*(?:--|-|–|to|through|thru)\s*"
     D = r"(\d{1,2}/\d{1,2}/\d{2,4})"
@@ -226,6 +240,10 @@ class Bills:
     def __init__(self, mon, cfg, resolve_host):
         self.mon, self.db, self.cfg, self.resolve_host = mon, mon.db, cfg, resolve_host
         self.db.c.executescript(SCHEMA)
+        cols = {r["name"] for r in self.db.q("PRAGMA table_info(bills)")}
+        for col in ("budget_amount REAL", "budget_balance REAL"):
+            if col.split()[0] not in cols:
+                self.db.x(f"ALTER TABLE bills ADD COLUMN {col}")
         self.dir = Path(cfg.db_path).parent / "bills"
         self.dir.mkdir(parents=True, exist_ok=True)
         self.smb_path = env("BILLS_SMB_PATH") or (cfg.backup_smb_path + "/Bills" if cfg.backup_smb_path else None)
@@ -260,7 +278,9 @@ class Bills:
             for k, v in (await ollama_extract(self.mon.http, text, fields)).items():
                 if fields.get(k) is None:
                     fields[k] = v
-        for k in ("amount", "usage"):
+        for k in ("amount", "usage", "budget_amount", "budget_balance"):
+            if k not in fields:
+                continue
             try:
                 fields[k] = None if fields[k] is None else float(str(fields[k]).replace(",", "").replace("$", ""))
             except ValueError:
@@ -278,10 +298,12 @@ class Bills:
                 return dup[0]["id"]
         status = "ok" if ok else "review"
         bid = self.db.x("""INSERT INTO bills (utility, provider, period_start, period_end, bill_date, due_date, amount, usage,
-                           unit, status, file, source, notes, created) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                           unit, status, file, source, notes, created, budget_amount, budget_balance)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                         (fields["utility"], fields["provider"], fields["period_start"], fields["period_end"],
                          fields["bill_date"], fields["due_date"], fields["amount"], fields["usage"], fields["unit"],
-                         status, path.name, source, None if text else "no text found in PDF (scanned image?)", int(time.time())))
+                         status, path.name, source, None if text else "no text found in PDF (scanned image?)", int(time.time()),
+                         fields.get("budget_amount"), fields.get("budget_balance")))
         label = f"{(fields['provider'] or fields['utility'] or 'Bill')}"
         amt = f"${fields['amount']:.2f}" if fields["amount"] is not None else "amount not found"
         self.mon.log_event("bills", f"Bill added from {source}: {label} {amt}" + (" · needs review" if status == "review" else ""))
@@ -406,6 +428,20 @@ class Bills:
                 ly = next((b for b in rows if (b["period_end"] or "")[:7] == y), None)
             latest[u] = dict(cur=cur, prev_amount=prev["amount"] if prev else None,
                              ly_amount=ly["amount"] if ly else None, ly_usage=ly["usage"] if ly else None)
+        # running budget balance: use the bill's own figure; otherwise keep a running sum of (actual - budget)
+        for u in UTILITIES:
+            run = None
+            for bl in sorted([x for x in bills if x["utility"] == u], key=lambda x: x["period_end"] or ""):
+                if bl.get("budget_amount") is None:
+                    run = None
+                    continue
+                if bl.get("budget_balance") is not None:
+                    run = bl["budget_balance"]
+                    bl["balance_source"] = "bill"
+                else:
+                    run = (run or 0) + (bl["amount"] or 0) - bl["budget_amount"]
+                    bl["budget_balance"] = round(run, 2)
+                    bl["balance_source"] = "calculated"
         return dict(bills=bills, latest=latest, status=self.status)
 
     def monthly(self):
@@ -443,8 +479,8 @@ def register(app_router, web, mon, bills: Bills):
         """Create (no id) or correct (id) a bill by hand."""
         b = await req.json()
         fields = {k: b.get(k) for k in ("utility", "provider", "period_start", "period_end", "bill_date", "due_date",
-                                         "amount", "usage", "unit", "notes")}
-        for k in ("amount", "usage"):
+                                         "amount", "usage", "unit", "notes", "budget_amount", "budget_balance")}
+        for k in ("amount", "usage", "budget_amount", "budget_balance"):
             fields[k] = None if fields[k] in (None, "") else float(fields[k])
         if fields["utility"] not in UTILITIES:
             return web.json_response(dict(ok=False, error="pick electric, water, gas or internet"), status=400)
