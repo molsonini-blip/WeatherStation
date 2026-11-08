@@ -41,6 +41,7 @@ h1{font-size:20px;margin:0;font-weight:650;letter-spacing:-.01em}
 button,.seg button{font:inherit;color:var(--ink);background:var(--surface);border:0;box-shadow:inset 0 0 0 1px var(--ring);border-radius:8px;padding:6px 10px;cursor:pointer}
 button:hover{background:var(--surface-2)}
 .seg{display:inline-flex;gap:4px}.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+#theme button{display:inline-flex;align-items:center;gap:6px}
 .banner{display:none;border-radius:12px;padding:12px 14px;margin-bottom:16px;background:var(--surface);box-shadow:inset 0 0 0 1px var(--ring),inset 4px 0 0 var(--warning)}
 .banner.storm{box-shadow:inset 0 0 0 1px var(--ring),inset 4px 0 0 var(--critical)}
 .banner.show{display:block}.banner b{font-weight:650}
@@ -102,7 +103,11 @@ td.n,th.n{text-align:right}
     <div class="seg" id="range" aria-label="History range">
       <button data-h="6">6h</button><button data-h="24" aria-pressed="true">24h</button><button data-h="72">3d</button><button data-h="168">7d</button>
     </div>
-    <button id="themeBtn" title="Toggle light/dark">Theme</button>
+    <div class="seg" id="theme" role="group" aria-label="Theme">
+      <button data-t="auto" title="Match system"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="9" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M5 14h6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>Auto</button>
+      <button data-t="light" title="Light theme"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3.2" fill="currentColor"/><g stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><path d="M8 1v1.6M8 13.4V15M1 8h1.6M13.4 8H15M3 3l1.1 1.1M11.9 11.9L13 13M3 13l1.1-1.1M11.9 4.1L13 3"/></g></svg>Light</button>
+      <button data-t="dark" title="Dark theme"><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M10.5 1.8A6.3 6.3 0 1 0 14.2 11 5 5 0 0 1 10.5 1.8z" fill="currentColor"/></svg>Dark</button>
+    </div>
   </header>
 
   <div class="banner" id="banner"></div>
@@ -168,14 +173,16 @@ const dtstr = ts => new Date(ts * 1000).toLocaleString([], {month: "short", day:
 const ago = ts => { const s = Date.now() / 1000 - ts; return s < 90 ? `${Math.round(s)}s ago` : s < 5400 ? `${Math.round(s / 60)} min ago` : s < 172800 ? `${Math.round(s / 3600)} h ago` : `${Math.round(s / 86400)} days ago`; };
 let state = {}, hours = 24, live = [], strikes = [];
 
-/* theme toggle (per-viewer convenience) */
-try { const t = localStorage.getItem("theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
-$("themeBtn").onclick = () => {
-  const dark = getComputedStyle(document.documentElement).colorScheme.includes("dark");
-  const t = dark ? "light" : "dark"; document.documentElement.dataset.theme = t;
-  try { localStorage.setItem("theme", t); } catch (e) {}
-  drawAll();
-};
+/* theme: auto (follow system) / light / dark, remembered per browser */
+function setTheme(t, save) {
+  if (t === "light" || t === "dark") document.documentElement.dataset.theme = t; else delete document.documentElement.dataset.theme;
+  $("theme").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.t === (t || "auto")));
+  if (save) try { localStorage.setItem("theme", t); } catch (e) {}
+  if (typeof drawAll === "function" && hist) drawAll();
+}
+let savedTheme = "auto"; try { savedTheme = localStorage.getItem("theme") || "auto"; } catch (e) {}
+$("theme").onclick = e => { const b = e.target.closest("button"); if (b) setTheme(b.dataset.t, true); };
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => setTheme(document.documentElement.dataset.theme || "auto"));
 
 /* ---------- chart: single-axis SVG line/area with crosshair tooltip ---------- */
 const tip = $("tip");
@@ -381,6 +388,7 @@ addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTim
   try { renderState(await j("/api/state")); await Promise.all([loadHistory(), loadLists()]); } catch (e) {}
   setTimeout(tick, document.body.classList.contains("live") ? 30000 : 300000);
 })();
+setTheme(savedTheme);
 connect();
 </script>
 </body>
