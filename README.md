@@ -86,18 +86,20 @@ Use these as a backup that keeps working even if your server is down.
 
 ## How hail is decided
 
-The Tempest flags hail from impacts on its sensor, and very heavy rain can trip it, so a hail flag on its own is logged as
-**possible hail (unconfirmed)** and does nothing else. Hail counts as confirmed, and can send `tempest_hail` and inflate
-the car cover, only when one of these backs it up:
+The Tempest flags hail from impacts on its sensor. Heavy rain can trip it, but missing real hail is worse, so:
 
-- an NWS warning (or watch, if `HAIL_SHIELD_ON_WATCH`) that mentions hail for your location,
-- the hail camera sees stones (when installed),
-- the sensor flags hail in at least `HAIL_CONFIRM_MINUTES` (3) of the last 10 minutes **and** lightning is within
-  `HAIL_CONFIRM_LIGHTNING_MI` (15 mi) in the last 30 minutes.
-
-Set `HAIL_STATION_CONFIRM=false` to trust the sensor alone. Once nothing points to hail, the cover stays up only while a
-thunderstorm is still within `STORM_LIGHTNING_MI` or a severe-weather warning is active; plain rain doesn't hold it up.
-Then it deflates after `HAIL_SHIELD_OFF_DELAY_MIN` (60).
+- **Any hail flag from the Tempest inflates the car cover right away.** On its own it counts as *possible hail
+  (unconfirmed)*, and the cover comes down `HAIL_UNCONFIRMED_OFF_MIN` (30) minutes after the last flag. Each new flag
+  restarts that clock.
+- **Backup sources confirm it**, switching to full protection:
+  - an NWS warning (or watch, if `HAIL_SHIELD_ON_WATCH`) that mentions hail for your location,
+  - the hail camera sees stones (when installed),
+  - the sensor flags hail in at least `HAIL_CONFIRM_MINUTES` (3) of the last 10 minutes **and** lightning is within
+    `HAIL_CONFIRM_LIGHTNING_MI` (15 mi) in the last 30 minutes.
+- **Once confirmed**, the cover stays up while a thunderstorm is within `STORM_LIGHTNING_MI` or a severe warning is
+  active, then deflates `HAIL_SHIELD_OFF_DELAY_MIN` (60) minutes after that. Plain rain doesn't hold it up.
+- An NWS hail warning on its own inflates the cover too, before any hail reaches the station.
+- Clicking **Auto** on the dashboard while it's up for an unconfirmed reading takes it down and ignores that reading.
 
 ## Car hail cover (smart plug)
 

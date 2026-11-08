@@ -85,6 +85,7 @@ class Config:
     hail_confirm: bool = env("HAIL_STATION_CONFIRM", "true").lower() in ("1", "true", "yes", "on")
     hail_confirm_minutes: int = env("HAIL_CONFIRM_MINUTES", 3, int)       # hail-flagged minutes within 10 min
     hail_confirm_lightning_mi: float = env("HAIL_CONFIRM_LIGHTNING_MI", 15, float)  # and a thunderstorm this close
+    hail_unconfirmed_off_min: float = env("HAIL_UNCONFIRMED_OFF_MIN", 30, float)  # cover down this long after an unbacked flag
     # hail shield (smart plug powering an inflatable car cover)
     shield_enabled: bool = env("HAIL_SHIELD", "true").lower() in ("1", "true", "yes", "on")
     shield_on_watch: bool = env("HAIL_SHIELD_ON_WATCH", "true").lower() in ("1", "true", "yes", "on")
@@ -569,9 +570,22 @@ class Monitor:
             want, why = sh["mode"] == "on", f"manual {sh['mode']}"
         else:
             threats = self.hail_threats()
+            last_flag = self.db.q("SELECT MAX(ts) t FROM obs WHERE precip_type IN (2,3)")[0]["t"] or 0
+            unconfirmed_until = last_flag + CFG.hail_unconfirmed_off_min * 60
             if threats:
+                # backed up by NWS, the camera, or repeated flags with lightning: full protection
                 sh["clear_since"] = None
+                sh["confirmed"] = True
+                sh.pop("unconfirmed_until", None)
                 want, why = True, "; ".join(threats)
+            elif now < unconfirmed_until and not sh.get("confirmed") and last_flag > sh.get("dismissed_flag", 0):
+                # cautious: any hail flag from the Tempest inflates right away; without backup it comes down
+                # HAIL_UNCONFIRMED_OFF_MIN after the last flag (a new flag restarts the clock)
+                sh["unconfirmed_until"] = unconfirmed_until
+                when = datetime.fromtimestamp(unconfirmed_until, ZoneInfo(CFG.tz)).strftime("%-I:%M %p")
+                want, why = True, f"possible hail at station (unconfirmed), down at {when} unless confirmed"
+            elif sh["on"] and not sh.get("confirmed") and not sh.get("clear_since"):
+                want, why = False, "no backup for the station's hail reading"
             elif sh["on"]:
                 # stay up while a thunderstorm is still close or a severe warning is active, then wait the off-delay
                 d, _ = self.nearest_strike_mi(1800)
@@ -591,6 +605,9 @@ class Monitor:
             sh["reason"] = why  # keep the shown reason current (e.g. after switching back from manual)
         if want != sh["on"]:
             sh.update(on=want, since=now if want else None, clear_since=None, reason=why if want else "")
+            if not want:
+                sh.pop("confirmed", None)
+                sh.pop("unconfirmed_until", None)
             self.send_shield(want, why)
         elif want and CFG.shield_resend_min and now - sh["last_sent"] > CFG.shield_resend_min * 60:
             self.send_shield(True, sh["reason"], resend=True)
@@ -686,7 +703,10 @@ class Monitor:
         left = None
         if sh["on"] and sh["clear_since"]:
             left = max(0, CFG.shield_off_delay_min * 60 - (time.time() - sh["clear_since"]))
+        elif sh["on"] and sh.get("unconfirmed_until") and sh["mode"] == "auto":
+            left = max(0, sh["unconfirmed_until"] - time.time())
         return dict(enabled=CFG.shield_enabled, on=sh["on"], mode=sh["mode"], since=sh["since"],
+                    confirmed=bool(sh.get("confirmed")),
                     reason=sh["reason"], off_in_s=left, threats=self.hail_threats(), plug=sh.get("plug"),
                     yolink=bool(CFG.yolink_uaid and CFG.yolink_secret))
 
@@ -1566,6 +1586,9 @@ def build_app(mon: Monitor):
             mon.shield["mode"] = mode
             if mode == "auto" and mon.shield["on"] and not mon.hail_threats():
                 mon.shield["clear_since"] = time.time() - CFG.shield_off_delay_min * 60  # nothing expected: off now
+                # dismiss the current hail flags; only a newer flag starts a new cautious window
+                mon.shield["dismissed_flag"] = mon.db.q("SELECT MAX(ts) t FROM obs WHERE precip_type IN (2,3)")[0]["t"] or 0
+                mon.shield.pop("confirmed", None)
             mon.log_event("shield", f"Hail shield set to {mode.upper()} from the dashboard")
             mon.update_shield()
             mon.push("shield", mon.shield_state())
