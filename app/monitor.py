@@ -96,6 +96,7 @@ class Config:
     yolink_device: str | None = env("YOLINK_DEVICE")  # plug name as shown in the YoLink app, or its deviceId
     yolink_host: str = env("YOLINK_HOST", "https://api.yosmart.com")
     yolink_poll_min: float = env("YOLINK_POLL_MIN", 5, float)  # temperature/humidity sensor polling
+    yolink_offline_hours: float = env("YOLINK_OFFLINE_HOURS", 6, float)  # no report this long = offline
     # long-term history
     history_backfill: bool = env("HISTORY_BACKFILL", "true").lower() in ("1", "true", "yes")  # download full Tempest history
     history_backfill_delay_s: float = env("HISTORY_BACKFILL_DELAY_S", 2, float)
@@ -914,6 +915,7 @@ class Monitor:
                         temp_limit_f=[c_to_f((st.get("tempLimit") or {}).get(k)) for k in ("min", "max")],
                         humidity_limit=[(st.get("humidityLimit") or {}).get(k) for k in ("min", "max")])
                     await asyncio.sleep(1)
+                self.yolink_record_changes()
                 self.yl_error = None
                 self.push("yolink", self.yolink_snapshot())
             except Exception as e:
@@ -928,13 +930,48 @@ class Monitor:
         except Exception:
             return int(time.time())
 
+    ALARM_TEXT = dict(lowBattery="Low battery", lowTemp="Too cold", highTemp="Too warm",
+                      lowHumidity="Too dry", highHumidity="Too humid")
+
+    def yolink_offline(self, s):
+        return s.get("online") is False or (s.get("ts") and time.time() - s["ts"] > CFG.yolink_offline_hours * 3600)
+
+    def yolink_record_changes(self):
+        """Write sensor alarms and offline/online changes to the activity log (YoLink's app does the notifying)."""
+        prev = self.db.kv_get("yl_alarm_state", {}) or {}
+        for dev, st in self.yl_state.items():
+            name, p = st["name"], prev.get(dev, {})
+            t = f"{st['temp_f']:.1f}°F" if st.get("temp_f") is not None else ""
+            h = f"{st['humidity']:.0f}%" if st.get("humidity") is not None else ""
+            lim_t = st.get("temp_limit_f") or [None, None]
+            lim_h = st.get("humidity_limit") or [None, None]
+            detail = dict(lowTemp=f"{t} (limit {lim_t[0]:.0f}°F)" if lim_t[0] is not None else t,
+                          highTemp=f"{t} (limit {lim_t[1]:.0f}°F)" if lim_t[1] is not None else t,
+                          lowHumidity=f"{h} (limit {lim_h[0]:.0f}%)" if lim_h[0] is not None else h,
+                          highHumidity=f"{h} (limit {lim_h[1]:.0f}%)" if lim_h[1] is not None else h,
+                          lowBattery=f"battery {st.get('battery')}/4")
+            now_al = set(a for a in st.get("alarm", []) if a in self.ALARM_TEXT)
+            was_al = set(p.get("alarm", []))
+            for a in sorted(now_al - was_al):
+                self.log_event("yolink", f"{name}: {self.ALARM_TEXT[a]} — {detail.get(a, '')}", dict(device=dev, alarm=a))
+            for a in sorted(was_al - now_al):
+                self.log_event("yolink", f"{name}: {self.ALARM_TEXT[a]} cleared — now {t} {h}".strip(), dict(device=dev, alarm=a, cleared=True))
+            off = bool(self.yolink_offline(st))
+            if off and not p.get("offline"):
+                last = datetime.fromtimestamp(st["ts"], ZoneInfo(CFG.tz)).strftime("%b %-d, %Y %-I:%M %p") if st.get("ts") else "never"
+                self.log_event("yolink", f"{name}: offline — last report {last}", dict(device=dev, offline=True))
+            elif not off and p.get("offline"):
+                self.log_event("yolink", f"{name}: back online — {t} {h}".strip(), dict(device=dev, offline=False))
+            prev[dev] = dict(alarm=sorted(now_al), offline=off)
+        self.db.kv_set("yl_alarm_state", prev)
+
     def yolink_snapshot(self):
         since = self.since(24 * 3600)
         out = []
-        for dev_id, s in sorted(self.yl_state.items(), key=lambda kv: kv[1]["name"].lower()):
+        for dev_id, s in sorted(self.yl_state.items(), key=lambda kv: (bool(self.yolink_offline(kv[1])), kv[1]["name"].lower())):
             r = self.db.q("SELECT MIN(temp_c) lo, MAX(temp_c) hi, MIN(humidity) hlo, MAX(humidity) hhi FROM yl_th "
                           "WHERE device=? AND ts>=?", (dev_id, since))[0]
-            out.append(dict(s, hi24_f=c_to_f(r["hi"]), lo24_f=c_to_f(r["lo"]), hum_lo24=r["hlo"], hum_hi24=r["hhi"]))
+            out.append(dict(s, offline=bool(self.yolink_offline(s)), hi24_f=c_to_f(r["hi"]), lo24_f=c_to_f(r["lo"]), hum_lo24=r["hlo"], hum_hi24=r["hhi"]))
         return dict(enabled=bool(CFG.yolink_uaid and CFG.yolink_secret), error=self.yl_error, sensors=out,
                     outdoor=dict(temp_f=c_to_f((self.latest or {}).get("temp_c")), humidity=(self.latest or {}).get("rh")))
 
@@ -1368,8 +1405,9 @@ def build_app(mon: Monitor):
         return web.json_response(rows)
 
     async def events(req):
-        return web.json_response(mon.db.q("SELECT ts, kind, message FROM events ORDER BY id DESC LIMIT ?",
-                                          (int(req.query.get("limit", 50)),)))
+        kind = req.query.get("kind")
+        return web.json_response(mon.db.q("SELECT ts, kind, message FROM events WHERE (? IS NULL OR kind=?) "
+                                          "ORDER BY id DESC LIMIT ?", (kind, kind, int(req.query.get("limit", 50)))))
 
     async def daily(req):
         days = min(int(req.query.get("days", 14)), 366)

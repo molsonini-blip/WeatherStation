@@ -116,7 +116,11 @@ finds every YoLink temperature/humidity sensor on your account and reads each on
 The tab shows a card per sensor (temperature, humidity, 24 h low/high, battery, last report, YoLink alarms like
 "Too hot" or "Low battery"). Click a card to expand its history: 24 h by default, or 3 days, 7 days and 30 days, with
 the Tempest outdoor temperature as a dashed reference. There's also a sensor table. History is kept in the same database. New sensors are picked up every 6 hours, or right away
-with **Find new sensors**.
+with **Refresh names & sensors**.
+
+Sensor alarms (the limits you set in the YoLink app: too warm/cold, too humid/dry, low battery) and sensors going
+offline (no report for `YOLINK_OFFLINE_HOURS`=6 hours) are recorded in the **Sensor log** on the YoLink tab, with the
+reading and the limit, plus when each one cleared. No notifications are sent; the YoLink app already does that.
 
 ## History (year over year)
 

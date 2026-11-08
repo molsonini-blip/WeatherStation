@@ -240,6 +240,7 @@ td.hl{font-weight:650}
     <div class="grid">
       <div class="notice card" id="ylNotice" style="display:none"></div>
       <div class="ylcards" id="ylCards"></div>
+      <section class="card" style="grid-column:span 12"><h2>Sensor log · alarms and offline</h2><div class="log" id="ylLog"></div></section>
       <section class="card" style="grid-column:span 12"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h2 style="margin:0">Sensors</h2><span style="flex:1"></span><button id="ylRefresh">Refresh names &amp; sensors</button></div>
         <div style="overflow:auto"><table id="ylTable"></table></div></section>
     </div>
@@ -656,7 +657,7 @@ function mchart(svg, list, opt = {}) {
 
 const ylColor = i => i < 8 ? `var(--c${i + 1})` : "var(--ink-3)";
 const battery = b => b == null ? "" : `<span class="bat${b <= 1 ? " low" : ""}" title="Battery ${b}/4">${[1, 2, 3, 4].map(k => `<i class="${k <= b ? "f" : ""}"></i>`).join("")}</span>`;
-const ALARM = {lowBattery: ["crit", "Low battery"], lowTemp: ["warn", "Too cold"], highTemp: ["warn", "Too hot"], lowHumidity: ["warn", "Too dry"], highHumidity: ["warn", "Too humid"]};
+const ALARM = {lowBattery: ["crit", "Low battery"], lowTemp: ["warn", "Too cold"], highTemp: ["warn", "Too warm"], lowHumidity: ["warn", "Too dry"], highHumidity: ["warn", "Too humid"]};
 const ylOpen = {};  // sensor id -> hours shown in its expanded history
 function renderYolinkCards() {
   const s = ylSnap; if (!s) return;
@@ -679,14 +680,14 @@ function renderYolinkCards() {
       <svg class="viz" id="ylT-${id}"></svg>
       <h3>Humidity %</h3><svg class="viz h" id="ylH-${id}"></svg>` : ""}</div></div>`; };
   let h = s.sensors.map(x => card(x.id, x.name, Object.assign({}, x, {
-      badge: x.online === false ? ` <span class="pill crit">Offline</span>` : "",
+      badge: x.offline ? ` <span class="pill crit" title="No report since ${x.ts ? dtstr(x.ts) : "ever"}">Offline</span>` : "",
       meta: `<span>24h ${fmt(x.lo24_f, 1)}°–${fmt(x.hi24_f, 1)}°</span><span>${battery(x.battery)}</span><span>${x.ts ? ago(x.ts) : ""}</span>`,
       pills: (x.alarm || []).filter(a => ALARM[a]).map(a => `<span class="pill ${ALARM[a][0]}" style="margin-top:6px">${ALARM[a][1]}</span>`).join(" ")}))).join("");
   h += card("out", "Outdoor (Tempest)", {temp_f: o.temp_f, humidity: o.humidity, meta: "<span>live</span>"});
   $("ylCards").innerHTML = h;
   Object.keys(ylOpen).forEach(drawCardHistory);
   $("ylTable").innerHTML = `<tr><th>Sensor</th><th>Model</th><th class="n">Temp</th><th class="n">Humidity</th><th class="n">24h low / high</th><th class="n">Battery</th><th class="n">Last report</th></tr>` +
-    s.sensors.map(x => `<tr><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.model || "")}</td><td class="n">${fmt(x.temp_f, 1)}°F</td><td class="n">${fmt(x.humidity)}%</td><td class="n">${fmt(x.lo24_f, 1)}° / ${fmt(x.hi24_f, 1)}°</td><td class="n">${x.battery ?? "--"}/4</td><td class="n">${x.ts ? dtstr(x.ts) : "--"}</td></tr>`).join("");
+    s.sensors.map(x => `<tr><td>${escapeHtml(x.name)}</td><td>${escapeHtml(x.model || "")}</td><td class="n">${fmt(x.temp_f, 1)}°F</td><td class="n">${fmt(x.humidity)}%</td><td class="n">${fmt(x.lo24_f, 1)}° / ${fmt(x.hi24_f, 1)}°</td><td class="n">${x.battery ?? "--"}/4</td><td class="n">${x.ts ? dtstr(x.ts) : "--"}${x.offline ? " ⚠ offline" : ""}</td></tr>`).join("");
 }
 async function drawCardHistory(id) {
   const hrs = ylOpen[id] || 24, d = await j(`/api/yolink/history?hours=${hrs}&device=${encodeURIComponent(id)}`).catch(() => null);
@@ -718,6 +719,8 @@ function drawYolink() { Object.keys(ylOpen).forEach(drawCardHistory); }
 async function loadYolink() {
   try { ylSnap = await j("/api/yolink/sensors"); } catch (e) { return; }
   renderYolinkCards();
+  j("/api/events?kind=yolink&limit=100").then(ev => { $("ylLog").innerHTML = ev.length ? ev.map(e => `<div><time>${dtstr(e.ts)}</time><span>${escapeHtml(e.message)}</span></div>`).join("")
+    : `<div class="empty">No alarms or offline sensors recorded yet. Alarms use the limits you set in the YoLink app.</div>`; }).catch(() => {});
 }
 $("ylRefresh").onclick = async () => { $("ylRefresh").textContent = "Searching…";
   const r = await fetch("/api/yolink/refresh", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
