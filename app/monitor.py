@@ -879,9 +879,12 @@ class Monitor:
 
     async def yolink_devices(self, refresh=False):
         yl = self.yolink
-        if refresh or not yl.get("devices") or time.time() - yl.get("devices_ts", 0) > 6 * 3600:
+        if refresh or not yl.get("devices") or time.time() - yl.get("devices_ts", 0) > 15 * 60:
             devs = (await self.yolink_call({"method": "Home.getDeviceList"})).get("devices", [])
             yl.update(devices=devs, devices_ts=time.time())
+            for d in devs:  # renames in the YoLink app show up right away
+                if d["deviceId"] in self.yl_state:
+                    self.yl_state[d["deviceId"]]["name"] = d["name"]
             self.db.kv_set("yl_devices", [{k: d.get(k) for k in ("deviceId", "name", "type", "modelName")} for d in devs])
         return yl["devices"]
 
@@ -1483,6 +1486,7 @@ def build_app(mon: Monitor):
             await mon.yolink_devices(refresh=True)
         except Exception as e:
             return web.json_response(dict(ok=False, error=str(e)[:200]), status=502)
+        mon.push("yolink", mon.yolink_snapshot())
         return web.json_response(dict(ok=True, devices=mon.db.kv_get("yl_devices", [])))
 
     r.add_get("/api/yolink/sensors", yl_sensors)

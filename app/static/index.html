@@ -240,7 +240,7 @@ td.hl{font-weight:650}
     <div class="grid">
       <div class="notice card" id="ylNotice" style="display:none"></div>
       <div class="ylcards" id="ylCards"></div>
-      <section class="card" style="grid-column:span 12"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h2 style="margin:0">Sensors</h2><span style="flex:1"></span><button id="ylRefresh">Find new sensors</button></div>
+      <section class="card" style="grid-column:span 12"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h2 style="margin:0">Sensors</h2><span style="flex:1"></span><button id="ylRefresh">Refresh names &amp; sensors</button></div>
         <div style="overflow:auto"><table id="ylTable"></table></div></section>
     </div>
   </main>
@@ -721,7 +721,7 @@ async function loadYolink() {
 }
 $("ylRefresh").onclick = async () => { $("ylRefresh").textContent = "Searching…";
   const r = await fetch("/api/yolink/refresh", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
-  $("ylRefresh").textContent = r.ok ? `Found ${r.devices.filter(d => d.type === "THSensor").length} sensors` : "Failed"; setTimeout(loadYolink, 2000); };
+  $("ylRefresh").textContent = r.ok ? `Updated · ${r.devices.filter(d => d.type === "THSensor").length} sensors` : "Failed"; loadYolink(); };
 setInterval(() => { if (page === "yolink") loadYolink(); }, 5 * 60000);
 
 /* ---------- History tab: year over year ---------- */
