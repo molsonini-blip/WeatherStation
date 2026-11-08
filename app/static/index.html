@@ -10,6 +10,7 @@
   --bg:#f4f3ef;--surface:#fcfcfb;--surface-2:#f0efea;--ink:#0b0b0b;--ink-2:#52514e;--ink-3:#7a7974;
   --grid:#e1e0d9;--axis:#c3c2b7;--ring:rgba(11,11,11,.10);
   --s1:#2a78d6;--s2:#eb6834;--s1-soft:rgba(42,120,214,.14);
+  --sun:#f2a900;--moon:#b9b5a8;--cloud:#cdd2da;--cloud-dk:#8e95a0;--rain:#2a78d6;--snow:#9fc3ee;--bolt:#f2a900;--cold:#4f9be8;--warm:#eb6834;
   --good:#0ca30c;--warning:#fab219;--serious:#ec835a;--critical:#d03b3b;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
@@ -17,12 +18,14 @@
   --bg:#111110;--surface:#1a1a19;--surface-2:#222220;--ink:#f0efec;--ink-2:#c3c2b7;--ink-3:#8f8e88;
   --grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);
   --s1:#3987e5;--s2:#d95926;--s1-soft:rgba(57,135,229,.18);
+  --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;
 }}
 :root[data-theme="dark"]{
   color-scheme:dark;
   --bg:#111110;--surface:#1a1a19;--surface-2:#222220;--ink:#f0efec;--ink-2:#c3c2b7;--ink-3:#8f8e88;
   --grid:#2c2c2a;--axis:#383835;--ring:rgba(255,255,255,.10);
   --s1:#3987e5;--s2:#d95926;--s1-soft:rgba(57,135,229,.18);
+  --sun:#f5b623;--moon:#d8d4c8;--cloud:#8b919b;--cloud-dk:#5c626c;--rain:#5aa2f0;--snow:#c9defa;--bolt:#ffc83d;--cold:#5aa2f0;--warm:#e0703f;
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased}
@@ -63,8 +66,16 @@ svg.viz{width:100%;height:180px;display:block;overflow:visible}
 .viz text{fill:var(--ink-3);font-size:11px}
 .tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--surface);padding:6px 8px;border-radius:8px;font-size:12px;white-space:nowrap;display:none;z-index:9;font-variant-numeric:tabular-nums}
 .fc{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:8px;text-align:center}
-.fc div{padding:6px 2px;border-radius:10px;background:var(--surface-2)}
-.fc .dn{font-weight:600}.fc .c{font-size:12px;color:var(--ink-2);min-height:32px}
+.fc .day{padding:10px 8px 12px;border-radius:12px;background:var(--surface-2);display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0}
+.fc .day.today{box-shadow:inset 0 0 0 2px var(--s1)}
+.fc .dn{font-weight:650}.fc .c{font-size:12px;color:var(--ink-2);min-height:32px;line-height:1.3}
+.wx{width:56px;height:56px;display:block}
+.fc .t{font-variant-numeric:tabular-nums;font-size:15px}.fc .t b{font-weight:650}.fc .t span{color:var(--ink-2)}
+.trk{position:relative;width:100%;height:6px;border-radius:3px;background:var(--grid);margin:2px 0 4px}
+.trk i{position:absolute;top:0;bottom:0;border-radius:3px;background:linear-gradient(90deg,var(--cold),var(--warm))}
+.pop{display:flex;align-items:center;gap:6px;width:100%;font-size:12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.pop .bar{flex:1;height:4px;border-radius:2px;background:var(--grid);overflow:hidden}.pop .bar i{display:block;height:100%;background:var(--rain);border-radius:2px}
+.tile .wx{float:right;width:48px;height:48px;margin:-4px -4px 0 0}
 table{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:13px}
 th{color:var(--ink-2);font-weight:550;text-align:left;padding:6px 8px;border-bottom:1px solid var(--grid)}
 td{padding:6px 8px;border-bottom:1px solid var(--grid)}
@@ -275,10 +286,55 @@ function renderState(s) {
   if (s.nws) renderNws(s.nws);
   freshness();
 }
+/* ---------- weather icons (inline SVG, built from parts) ---------- */
+const WX = {
+  sun: (x = 32, y = 32, r = 11) => { let g = `<circle cx="${x}" cy="${y}" r="${r}" fill="var(--sun)"/>`;
+    for (let i = 0; i < 8; i++) { const a = i * Math.PI / 4, c = Math.cos(a), s = Math.sin(a);
+      g += `<line x1="${x + c * (r + 4)}" y1="${y + s * (r + 4)}" x2="${x + c * (r + 9)}" y2="${y + s * (r + 9)}" stroke="var(--sun)" stroke-width="3" stroke-linecap="round"/>`; }
+    return g; },
+  moon: (x = 32, y = 30, r = 13) => `<path d="M${x + 4},${y - r} A${r},${r} 0 1,0 ${x + r},${y + 6} A${r * .8},${r * .8} 0 1,1 ${x + 4},${y - r}Z" fill="var(--moon)"/>`,
+  cloud: (dark, dy = 0) => `<path d="M18,${44 + dy} h30 a10,10 0 0,0 0,-20 a14,14 0 0,0 -26,-3 a9.5,9.5 0 0,0 -4,23z" fill="var(${dark ? "--cloud-dk" : "--cloud"})"/>`,
+  rain: (n = 3) => Array.from({length: n}, (_, i) => { const x = 24 + i * 9 - (n - 3) * 4; return `<line x1="${x}" y1="50" x2="${x - 3}" y2="59" stroke="var(--rain)" stroke-width="3" stroke-linecap="round"/>`; }).join(""),
+  snow: () => [22, 32, 42].map((x, i) => `<g transform="translate(${x},${53 + (i % 2) * 4})" stroke="var(--snow)" stroke-width="2.2" stroke-linecap="round"><line x1="-4" y1="0" x2="4" y2="0"/><line x1="-2" y1="-3.5" x2="2" y2="3.5"/><line x1="2" y1="-3.5" x2="-2" y2="3.5"/></g>`).join(""),
+  sleet: () => `<line x1="24" y1="50" x2="21" y2="59" stroke="var(--rain)" stroke-width="3" stroke-linecap="round"/><circle cx="33" cy="55" r="2.6" fill="var(--snow)"/><line x1="42" y1="50" x2="39" y2="59" stroke="var(--rain)" stroke-width="3" stroke-linecap="round"/>`,
+  bolt: () => `<path d="M33,40 l-8,13 h7 l-3,10 l11,-15 h-7 l4,-8z" fill="var(--bolt)" stroke="var(--surface)" stroke-width="1.5" stroke-linejoin="round"/>`,
+  fog: () => [46, 52, 58].map((y, i) => `<line x1="${14 + i * 3}" y1="${y}" x2="${50 - i * 2}" y2="${y}" stroke="var(--cloud-dk)" stroke-width="3" stroke-linecap="round"/>`).join(""),
+  wind: () => `<g fill="none" stroke="var(--cloud-dk)" stroke-width="3" stroke-linecap="round"><path d="M10,26 h30 a6,6 0 1,0 -6,-6"/><path d="M10,36 h40 a6,6 0 1,1 -6,6"/><path d="M10,46 h22"/></g>`,
+};
+function wxIcon(icon, cond = "") {
+  const k = (icon || "").toLowerCase(), c = cond.toLowerCase();
+  const night = k.includes("night"), maybe = k.startsWith("possibly");
+  const peek = () => night ? WX.moon(42, 20, 10) : WX.sun(44, 20, 9);
+  let g;
+  if (k.includes("thunder") || c.includes("thunder")) g = (maybe ? peek() : "") + WX.cloud(true, -6) + WX.rain(2) + WX.bolt();
+  else if (k.includes("sleet") || c.includes("sleet")) g = (maybe ? peek() : "") + WX.cloud(false, -6) + WX.sleet();
+  else if (k.includes("snow") || c.includes("snow")) g = (maybe ? peek() : "") + WX.cloud(false, -6) + WX.snow();
+  else if (k.includes("rain") || c.includes("rain") || c.includes("shower")) g = (maybe ? peek() : "") + WX.cloud(!maybe, -6) + WX.rain(maybe ? 2 : 3);
+  else if (k.includes("fog") || c.includes("fog")) g = WX.cloud(false, -10) + WX.fog();
+  else if (k.includes("wind") || c.includes("wind")) g = WX.wind();
+  else if (k.includes("partly") || c.includes("partly")) g = peek() + WX.cloud(false, 4);
+  else if (k.includes("cloud") || c.includes("cloud") || c.includes("overcast")) g = `<g transform="translate(8,-6) scale(.7)">${WX.cloud(true)}</g>` + WX.cloud(false, 4);
+  else g = night ? WX.moon() : WX.sun();
+  return `<svg class="wx" viewBox="0 0 64 64" role="img" aria-label="${escapeHtml(cond)}">${g}</svg>`;
+}
+
 function renderForecast(f) {
   const d = f.daily || [];
-  $("fc").innerHTML = d.map(x => `<div><div class="dn">${new Date(x.day_start_local * 1000).toLocaleDateString([], {weekday: "short"})}</div><div class="c">${escapeHtml(x.conditions || "")}</div><div>${fmt(x.air_temp_high)}° / ${fmt(x.air_temp_low)}°</div><div class="sub">${fmt(x.precip_probability)}% rain</div></div>`).join("") || `<div class="empty">Forecast needs TEMPEST_TOKEN.</div>`;
-  if (d[0]) { $("fcT").innerHTML = `${fmt(d[0].air_temp_high)}°<small>/ ${fmt(d[0].air_temp_low)}°</small>`; $("fcD").textContent = `${d[0].conditions} · ${d[0].precip_probability}% rain`; }
+  if (!d.length) { $("fc").innerHTML = `<div class="empty">Forecast needs TEMPEST_TOKEN.</div>`; return; }
+  const lo = Math.min(...d.map(x => x.air_temp_low)), hi = Math.max(...d.map(x => x.air_temp_high)), span = Math.max(1, hi - lo);
+  $("fc").innerHTML = d.map((x, i) => {
+    const day = i === 0 ? "Today" : new Date(x.day_start_local * 1000).toLocaleDateString([], {weekday: "short"});
+    const l = (x.air_temp_low - lo) / span * 100, w = (x.air_temp_high - x.air_temp_low) / span * 100, p = x.precip_probability || 0;
+    return `<div class="day${i === 0 ? " today" : ""}" title="${escapeHtml(x.conditions || "")}: high ${fmt(x.air_temp_high)}°, low ${fmt(x.air_temp_low)}°, ${p}% chance of rain">
+      <div class="dn">${day}</div>${wxIcon(x.icon, x.conditions)}<div class="c">${escapeHtml(x.conditions || "")}</div>
+      <div class="t"><b>${fmt(x.air_temp_high)}°</b> <span>${fmt(x.air_temp_low)}°</span></div>
+      <div class="trk"><i style="left:${l}%;width:${Math.max(w, 4)}%"></i></div>
+      <div class="pop"><svg width="10" height="12" viewBox="0 0 10 12" aria-hidden="true"><path d="M5,0 C5,0 0,6 0,8 a5,4 0 0,0 10,0 C10,6 5,0 5,0z" fill="var(--rain)" opacity="${p ? 1 : .35}"/></svg><span class="bar"><i style="width:${p}%"></i></span><span>${p}%</span></div>
+    </div>`;
+  }).join("");
+  const t = d[0];
+  $("fcT").innerHTML = `${wxIcon(t.icon, t.conditions)}${fmt(t.air_temp_high)}°<small>/ ${fmt(t.air_temp_low)}°</small>`;
+  $("fcD").textContent = `${t.conditions} · ${t.precip_probability}% chance of precip`;
 }
 function renderNws(a) {
   $("nwsN").innerHTML = a.length ? `${a.length}<small>active</small>` : `0<small>active</small>`;
