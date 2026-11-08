@@ -210,6 +210,7 @@ def parse_escrow(text: str):
     """Tax and insurance payments out of escrow: [(YYYY-MM, kind, description, amount)]."""
     low = text.lower()
     low = re.sub(r"(?<=[a-z])(?=20\d\d)", " ", low)  # 'dec2024' -> 'dec 2024'
+    low = re.sub(r"(\d) \.(\d\d)\b", r"\1.\2", low)  # '$1,017 .00' (PDF spacing)
     months = [(m.start(), f"{m.group(2)}-{MONTHS[m.group(1)]:02d}") for m in re.finditer(MONTH_RE, low)]
     items = {}
     for m in re.finditer(r"(-?\$?[\d,]+\.\d{2})\s*[a-z]?\*?\s*" + ITEM, low):
@@ -461,6 +462,9 @@ class Properties:
             return sid
         if kind == "escrow":
             items = parse_escrow(text)
+            if not items:
+                log.info("properties: %s mentions escrow but lists no tax or insurance payments - skipped", rel)
+                return None
             sdate = statement_date_escrow(text)
             (self.dir / fname).write_bytes(data)
             self.store_escrow(property_id, items, sdate, fname)
@@ -503,6 +507,10 @@ class Properties:
     def store_escrow(self, pid, items, sdate, fname):
         for month, kind, desc, amt in items:
             est = 1 if sdate and month > sdate[:7] else 0
+            if not est:  # an actual payment replaces an older projection for that year (paid in a different month)
+                self.db.x("DELETE FROM escrow_items WHERE property_id=? AND kind=? AND estimate=1 AND substr(month,1,4)=? "
+                          "AND month NOT LIKE '____-00%' AND month<>? AND COALESCE(source_date,'')<?",
+                          (pid, kind, month[:4], month, sdate or "9999"))
             cur = self.db.q("SELECT id, estimate, source_date FROM escrow_items WHERE property_id=? AND month=? AND kind=?",
                             (pid, month, kind))
             if cur:
@@ -646,8 +654,7 @@ class Properties:
         for r in self.db.q("SELECT property_id, substr(month,1,4) y, kind, SUM(amount) amount FROM escrow_items "
                            "WHERE month LIKE '____-00%' GROUP BY property_id, y, kind"):
             k = (r["property_id"], int(r["y"]), r["kind"])
-            if k not in res or res[k]["estimate"] or r["amount"] >= res[k]["amount"] - 0.01:
-                res[k] = dict(amount=round(r["amount"], 2), source="annual", estimate=False)
+            res[k] = dict(amount=round(r["amount"], 2), source="annual", estimate=False)
         for s in self.db.q("SELECT property_id, statement_date, taxes_ytd, insurance_ytd FROM loan_statements "
                            "WHERE statement_date IS NOT NULL AND (taxes_ytd IS NOT NULL OR insurance_ytd IS NOT NULL)"):
             d = date.fromisoformat(s["statement_date"])
