@@ -92,7 +92,12 @@ The monitor can switch a smart plug that powers an inflatable car cover.
   On and Off are manual overrides that pause automation until you pick Auto again. Use On to test the plug.
 - The state survives restarts.
 
-Make two IFTTT applets: Webhooks `tempest_hail_shield_on` → your plug's **Turn on**, and `tempest_hail_shield_off` → **Turn off**.
+**YoLink plug (recommended, direct):** set `YOLINK_UAID`, `YOLINK_SECRET` and `YOLINK_DEVICE` (the plug's name in the YoLink app).
+Get the UAID and Secret Key in the YoLink app: **Settings → Account → Advanced Settings → User Access Credentials → +**.
+The monitor turns the plug on/off through YoLink's API, reads the state back to confirm, and retries up to 5 times.
+If it still fails, it sends `tempest_shield_failed` to IFTTT so you know to check the cover. This path costs no IFTTT credits.
+
+**Or via IFTTT:** make two applets: Webhooks `tempest_hail_shield_on` → your plug's **Turn on**, and `tempest_hail_shield_off` → **Turn off**.
 Or set `HAIL_SHIELD_ON_URL` / `HAIL_SHIELD_OFF_URL` to call Home Assistant or the plug's own API directly (a POST to each URL), which skips IFTTT.
 
 | Setting | Default | |

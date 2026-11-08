@@ -90,6 +90,11 @@ class Config:
     shield_resend_min: float = env("HAIL_SHIELD_RESEND_MIN", 0, float)  # re-send "on" while active; 0 = off
     shield_on_url: str | None = env("HAIL_SHIELD_ON_URL")   # optional direct webhook (Home Assistant, plug API)
     shield_off_url: str | None = env("HAIL_SHIELD_OFF_URL")
+    # YoLink cloud API (direct plug control: no IFTTT credits)
+    yolink_uaid: str | None = env("YOLINK_UAID")
+    yolink_secret: str | None = env("YOLINK_SECRET")
+    yolink_device: str | None = env("YOLINK_DEVICE")  # plug name as shown in the YoLink app, or its deviceId
+    yolink_host: str = env("YOLINK_HOST", "https://api.yosmart.com")
     live_forecast_min: float = env("LIVE_FORECAST_MIN", 15, float)
     live_nws_min: float = env("LIVE_NWS_MIN", 2, float)
     daily_summary_time: str = env("DAILY_SUMMARY_TIME", "07:00")
@@ -103,7 +108,7 @@ REST = "https://swd.weatherflow.com/swd/rest"
 WS_URL = "wss://ws.weatherflow.com/swd/data"
 STATIC = Path(__file__).parent / "static"
 
-ALERT_LABELS = dict(hail_shield_on="Hail shield ON", hail_shield_off="Hail shield OFF", hail="Hail at station", hail_warning="Hail warning", watch_start="Storm watch", storm_start="Storm started", storm_end="Storm ended",
+ALERT_LABELS = dict(shield_failed="Car cover plug FAILED", hail_shield_on="Hail shield ON", hail_shield_off="Hail shield OFF", hail="Hail at station", hail_warning="Hail warning", watch_start="Storm watch", storm_start="Storm started", storm_end="Storm ended",
                     all_clear="All clear", lightning_close="Close lightning", high_wind="High wind",
                     heavy_rain="Heavy rain", nws_alert="NWS", daily="Daily summary", offline="Station offline",
                     test="Test")
@@ -239,6 +244,7 @@ class Monitor:
     clients: set = field(default_factory=set)
     offline_alerted: bool = False
     _mode_changed: asyncio.Event = field(default_factory=asyncio.Event)
+    yolink: dict = field(default_factory=dict)
     shield: dict = field(default_factory=lambda: dict(on=False, mode="auto", since=None, clear_since=None,
                                                       reason="", last_sent=0))
 
@@ -507,6 +513,8 @@ class Monitor:
         loop = asyncio.get_event_loop()
         loop.create_task(self.send_ifttt(name, "Inflating car cover" if on else "Deflating car cover", why,
                                          self.station.get("name") or ""))
+        if CFG.yolink_uaid and CFG.yolink_secret and self.http:
+            loop.create_task(self.yolink_set(on))
         url = CFG.shield_on_url if on else CFG.shield_off_url
         if url and self.http:
             async def hit():
@@ -517,13 +525,78 @@ class Monitor:
                     log.warning("shield webhook failed: %s", e)
             loop.create_task(hit())
 
+    async def yolink_call(self, body, retry_auth=True):
+        """Call the YoLink Open API v2 with a cached access token."""
+        yl = self.yolink
+        if not yl.get("token") or time.time() > yl.get("exp", 0) - 60:
+            async with self.http.post(f"{CFG.yolink_host}/open/yolink/token", data=dict(
+                    grant_type="client_credentials", client_id=CFG.yolink_uaid,
+                    client_secret=CFG.yolink_secret)) as r:
+                t = await r.json(content_type=None)
+            if "access_token" not in t:
+                raise RuntimeError(f"YoLink auth failed: {t.get('msg') or t}")
+            yl.update(token=t["access_token"], exp=time.time() + int(t.get("expires_in", 3600)))
+        body = dict(body, time=int(time.time() * 1000))
+        async with self.http.post(f"{CFG.yolink_host}/open/yolink/v2/api", json=body,
+                                  headers={"Authorization": f"Bearer {yl['token']}"}) as r:
+            res = await r.json(content_type=None)
+        if res.get("code") not in ("000000", None):
+            if retry_auth and str(res.get("code", "")).startswith("0102"):  # token problem: re-auth once
+                yl["token"] = None
+                return await self.yolink_call(body, retry_auth=False)
+            raise RuntimeError(f"YoLink {body.get('method')}: {res.get('code')} {res.get('desc') or res.get('msg')}")
+        return res.get("data") or {}
+
+    async def yolink_plug(self):
+        yl = self.yolink
+        if not yl.get("device"):
+            devs = (await self.yolink_call({"method": "Home.getDeviceList"})).get("devices", [])
+            want = (CFG.yolink_device or "").strip().lower()
+            plugs = [d for d in devs if "Outlet" in d.get("type", "")]
+            match = [d for d in plugs if want in (d["name"].lower(), d["deviceId"].lower())] if want else plugs[:1]
+            if not match:
+                names = ", ".join(f"{d['name']} ({d['type']})" for d in devs) or "none"
+                raise RuntimeError(f"YoLink plug '{CFG.yolink_device}' not found. Devices: {names}")
+            yl["device"] = match[0]
+            log.info("YoLink plug: %s (%s)", match[0]["name"], match[0]["type"])
+        return yl["device"]
+
+    async def yolink_set(self, on):
+        """Turn the YoLink plug on/off, retrying, then read back its state."""
+        last = None
+        for attempt in range(5):
+            try:
+                d = await self.yolink_plug()
+                await self.yolink_call({"method": f"{d['type']}.setState", "targetDevice": d["deviceId"],
+                                        "token": d["token"], "params": {"state": "open" if on else "close"}})
+                await asyncio.sleep(3)
+                st = (await self.yolink_call({"method": f"{d['type']}.getState", "targetDevice": d["deviceId"],
+                                              "token": d["token"]})).get("state")
+                ok = (st in ("open", True)) == on
+                self.shield["plug"] = dict(ok=ok, state=st, ts=int(time.time()), name=d["name"])
+                self.log_event("shield", f"YoLink plug '{d['name']}' is {'ON' if st in ('open', True) else 'OFF'}"
+                               + ("" if ok else " (did not change, retrying)"))
+                self.push("shield", self.shield_state())
+                if ok:
+                    return
+            except Exception as e:
+                last = e
+                self.yolink.pop("device", None)
+                log.warning("YoLink attempt %d failed: %s", attempt + 1, e)
+            await asyncio.sleep(10 * (attempt + 1))
+        self.shield["plug"] = dict(ok=False, error=str(last or "state did not change"), ts=int(time.time()))
+        self.alert("shield_failed", f"Could not turn car cover plug {'ON' if on else 'OFF'}", str(last or "")[:120], "",
+                   cooldown=False)
+        self.push("shield", self.shield_state())
+
     def shield_state(self):
         sh = self.shield
         left = None
         if sh["on"] and sh["clear_since"]:
             left = max(0, CFG.shield_off_delay_min * 60 - (time.time() - sh["clear_since"]))
         return dict(enabled=CFG.shield_enabled, on=sh["on"], mode=sh["mode"], since=sh["since"],
-                    reason=sh["reason"], off_in_s=left, threats=self.hail_threats())
+                    reason=sh["reason"], off_in_s=left, threats=self.hail_threats(), plug=sh.get("plug"),
+                    yolink=bool(CFG.yolink_uaid and CFG.yolink_secret))
 
     def transition(self, old, new):
         now = time.time()

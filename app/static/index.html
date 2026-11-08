@@ -381,6 +381,7 @@ function renderShield(sh) {
   $("shieldWhy").textContent = sh.mode !== "auto" ? `Manual ${sh.mode.toUpperCase()} (automatic control paused)`
     : sh.on ? (mins != null ? `No more hail expected · deflates in ${mins} min` : `Hail expected: ${sh.reason}`) + (sh.since ? ` · since ${tstr(sh.since)}` : "")
     : "Inflates automatically when hail is expected or detected";
+  const pl = sh.plug; if (sh.yolink && pl) $("shieldWhy").textContent += pl.error ? ` · ⚠ plug error: ${pl.error}` : ` · plug ${pl.name || ""} reports ${pl.state === "open" || pl.state === true ? "ON" : "OFF"}${pl.ok ? " ✓" : " ⚠"}`;
   $("shieldMode").querySelectorAll("button").forEach(b => b.setAttribute("aria-pressed", b.dataset.m === sh.mode));
 }
 $("shieldMode").onclick = async e => { const b = e.target.closest("button"); if (!b) return;
