@@ -755,6 +755,46 @@ def build_app(mon: Monitor):
         rows = mon.db.q("SELECT ts, speed, dir FROM rapid WHERE ts>=? ORDER BY ts", (mon.since(mins * 60),))
         return web.json_response(bucket([dict(ts=x["ts"], mph=ms_to_mph(x["speed"]), dir=x["dir"]) for x in rows], 600))
 
+    async def wind_candles(req):
+        """OHLC-style wind: open/close = first/last average speed in the bucket,
+        low = lowest lull, high = highest gust (3-second samples included when recorded)."""
+        hours = min(float(req.query.get("hours", 24)), 24 * 31)
+        bucket_s = int(req.query.get("bucket", 0)) or (900 if hours <= 6 else 3600 if hours <= 24
+                                                        else 3 * 3600 if hours <= 72 else 6 * 3600)
+        since = mon.since(hours * 3600)
+        rows = mon.db.q("SELECT ts, wind_lull, wind_avg, wind_gust, wind_dir FROM obs WHERE ts>=? "
+                        "AND wind_avg IS NOT NULL ORDER BY ts", (since,))
+        rapid_max = {r["k"]: r["g"] for r in mon.db.q(
+            "SELECT ts/? k, MAX(speed) g FROM rapid WHERE ts>=? GROUP BY k", (bucket_s, since))}
+        import math
+        out, cur = [], None
+        for x in rows:
+            k = x["ts"] // bucket_s
+            if not cur or cur["k"] != k:
+                if cur:
+                    out.append(cur)
+                cur = dict(k=k, ts=k * bucket_s, open=x["wind_avg"], low=x["wind_lull"] or 0,
+                           high=x["wind_gust"] or 0, sx=0.0, sy=0.0, n=0, sum=0.0)
+            cur["close"] = x["wind_avg"]
+            cur["low"] = min(cur["low"], x["wind_lull"] if x["wind_lull"] is not None else x["wind_avg"])
+            cur["high"] = max(cur["high"], x["wind_gust"] or 0)
+            cur["sum"] += x["wind_avg"]
+            cur["n"] += 1
+            if x["wind_dir"] is not None and x["wind_avg"]:
+                a = math.radians(x["wind_dir"])
+                cur["sx"] += math.sin(a) * x["wind_avg"]
+                cur["sy"] += math.cos(a) * x["wind_avg"]
+        if cur:
+            out.append(cur)
+        res = []
+        for c in out:
+            hi = max(c["high"], rapid_max.get(c["k"]) or 0)
+            d = (math.degrees(math.atan2(c["sx"], c["sy"])) + 360) % 360 if (c["sx"] or c["sy"]) else None
+            res.append(dict(ts=c["ts"], bucket=bucket_s, open=ms_to_mph(c["open"]), close=ms_to_mph(c["close"]),
+                            low=ms_to_mph(c["low"]), high=ms_to_mph(hi), mean=ms_to_mph(c["sum"] / c["n"]),
+                            dir=d, card=cardinal(d), n=c["n"]))
+        return web.json_response(res)
+
     async def strikes(req):
         hours = min(float(req.query.get("hours", 24)), 24 * 31)
         rows = mon.db.q("SELECT ts, dist_km FROM strikes WHERE ts>=? ORDER BY ts", (mon.since(hours * 3600),))
@@ -808,6 +848,7 @@ def build_app(mon: Monitor):
     r.add_get("/api/history", history)
     r.add_get("/api/rapid", rapid)
     r.add_get("/api/strikes", strikes)
+    r.add_get("/api/wind_candles", wind_candles)
     r.add_get("/api/storms", storms)
     r.add_get("/api/events", events)
     r.add_get("/api/daily", daily)

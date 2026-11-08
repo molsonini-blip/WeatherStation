@@ -63,6 +63,8 @@ button:hover{background:var(--surface-2)}
 .chart .head h2{margin:0}.chart .head .now{margin-left:auto;font-weight:600;font-variant-numeric:tabular-nums}
 .legend{display:flex;gap:12px;font-size:12px;color:var(--ink-2)}
 .legend i{display:inline-block;width:12px;height:2px;vertical-align:middle;margin-right:4px}
+.legend i.sw{width:8px;height:12px;border-radius:2px}.legend i.up{background:var(--s2)}.legend i.dn{background:var(--s1)}
+.legend i.wk{width:2px;height:12px;background:var(--ink-3)}
 svg.viz{width:100%;height:180px;display:block;overflow:visible}
 .viz text{fill:var(--ink-3);font-size:11px}
 .tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--surface);padding:6px 8px;border-radius:8px;font-size:12px;white-space:nowrap;display:none;z-index:9;font-variant-numeric:tabular-nums}
@@ -148,7 +150,7 @@ td.n,th.n{text-align:right}
 
     <section class="card chart"><div class="head"><h2>Temperature</h2><span class="now" id="nTemp"></span></div><svg class="viz" id="cTemp"></svg></section>
     <section class="card chart"><div class="head"><h2>Pressure (sea level)</h2><span class="now" id="nPres"></span></div><svg class="viz" id="cPres"></svg></section>
-    <section class="card chart"><div class="head"><h2>Wind</h2><span class="legend"><span><i style="background:var(--s1)"></i>Average</span><span><i style="background:var(--s2)"></i>Gust</span></span><span class="now" id="nWind"></span></div><svg class="viz" id="cWind"></svg></section>
+    <section class="card chart"><div class="head"><h2>Wind</h2><span class="legend"><span><i class="sw up"></i>Rising</span><span><i class="sw dn"></i>Easing</span><span><i class="wk"></i>Lull–gust</span></span><span class="now" id="nWind"></span></div><svg class="viz" id="cWind"></svg></section>
     <section class="card chart"><div class="head"><h2>Rain (accumulated over range)</h2><span class="now" id="nRain"></span></div><svg class="viz" id="cRain"></svg></section>
     <section class="card chart wide"><div class="head"><h2>Lightning strikes · distance (mi)</h2><span class="now" id="nLtg"></span></div><svg class="viz" id="cLtg" style="height:140px"></svg></section>
 
@@ -231,15 +233,48 @@ function chart(svg, rows, series, opt = {}) {
   svg.onmouseleave = () => { xh.style.display = "none"; svg.querySelectorAll(".hp").forEach(c => c.style.display = "none"); tip.style.display = "none"; };
 }
 
+/* ---------- wind candlesticks: body = average speed open→close, wick = lull→gust ---------- */
+function candleChart(svg, rows, x0, x1) {
+  const W = svg.clientWidth || 600, H = svg.clientHeight || 180, L = 40, R = 8, T = 8, B = 22;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  if (!rows.length) { svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle">No data yet</text>`; return; }
+  const bk = rows[0].bucket, mx = Math.max(10, ...rows.map(r => r.high)), step = mx <= 20 ? 5 : mx <= 50 ? 10 : 20, hi0 = Math.ceil(mx / step) * step;
+  const X = t => L + (t - x0) / Math.max(1, x1 - x0) * (W - L - R), Y = v => T + (1 - v / hi0) * (H - T - B);
+  const slot = (W - L - R) * bk / Math.max(1, x1 - x0), bw = Math.max(2, Math.min(18, slot - 2));
+  let g = "";
+  for (let v = 0; v <= hi0; v += step) { const y = Y(v);
+    g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${v}</text>`; }
+  const span = x1 - x0, nx = Math.max(2, Math.floor((W - L) / 110));
+  for (let i = 0; i <= nx; i++) { const t = x0 + span * i / nx;
+    const lab = span > 2 * 86400 ? new Date(t * 1000).toLocaleDateString([], {weekday: "short", hour: "numeric"}) : new Date(t * 1000).toLocaleTimeString([], {hour: "numeric"});
+    g += `<text x="${X(t)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === nx ? "end" : "middle"}">${lab}</text>`; }
+  g += `<line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="var(--axis)"/>`;
+  rows.forEach((r, i) => {
+    const cx = X(r.ts + bk / 2), up = r.close >= r.open, col = up ? "var(--s2)" : "var(--s1)";
+    const yt = Y(Math.max(r.open, r.close)), yb = Y(Math.min(r.open, r.close)), h = Math.max(2, yb - yt);
+    g += `<line x1="${cx}" x2="${cx}" y1="${Y(r.high)}" y2="${Y(r.low)}" stroke="var(--ink-3)" stroke-width="1.5" stroke-linecap="round"/>`;
+    g += `<rect x="${cx - bw / 2}" y="${yt}" width="${bw}" height="${h}" rx="${Math.min(2, bw / 4)}" fill="${col}" stroke="var(--surface)" stroke-width="1"/>`;
+    g += `<rect class="hit" data-i="${i}" x="${cx - Math.max(bw, slot) / 2}" y="${T}" width="${Math.max(bw, slot)}" height="${H - T - B}" fill="transparent"/>`;
+  });
+  svg.innerHTML = g;
+  svg.onmousemove = e => {
+    const el = e.target.closest(".hit"); if (!el) { tip.style.display = "none"; return; }
+    const r = rows[+el.dataset.i], end = new Date((r.ts + bk) * 1000).toLocaleTimeString([], {hour: "numeric", minute: "2-digit"});
+    tip.innerHTML = `${dtstr(r.ts)} – ${end}<br>Gust: <b>${fmt(r.high)} mph</b><br>Avg: <b>${fmt(r.open)} → ${fmt(r.close)} mph</b> (mean ${fmt(r.mean)})<br>Lull: <b>${fmt(r.low)} mph</b>${r.card ? `<br>From: <b>${r.card}</b>` : ""}`;
+    tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY - 12 - tip.offsetHeight) + "px";
+  };
+  svg.onmouseleave = () => tip.style.display = "none";
+}
+
 /* ---------- data ---------- */
-let hist = [];
+let hist = [], candles = [];
 const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 function drawAll() {
   const c1 = css("--s1"), c2 = css("--s2"), now = Date.now() / 1000, x0 = now - hours * 3600;
   const gap = hours > 48 ? 3600 : 600;
   chart($("cTemp"), hist, [{k: "temp_f", l: "Temp", c: c1, area: true}], {u: "°F", span: 4, x0, x1: now, gap});
   chart($("cPres"), hist, [{k: "pressure_inhg", l: "Pressure", c: c1}], {u: " inHg", dec: 2, span: .06, x0, x1: now, gap});
-  chart($("cWind"), hist, [{k: "wind_avg_mph", l: "Average", c: c1}, {k: "wind_gust_mph", l: "Gust", c: c2, w: 1.5}], {u: " mph", zero: true, span: 10, x0, x1: now, gap});
+  candleChart($("cWind"), candles, x0, now);
   chart($("cRain"), hist, [{k: "rain_cum_in", l: "Rain", c: c1, area: true}], {u: " in", dec: 2, zero: true, span: .1, x0, x1: now, gap});
   chart($("cLtg"), strikes, [{k: "mi", l: "Distance", c: c2}], {u: " mi", zero: true, span: 10, dots: true, x0, x1: now});
   chart($("cLive"), live, [{k: "mph", l: "Wind", c: c1}], {u: " mph", zero: true, span: 10, dec: 1, x0: now - 1800, x1: now, gap: 30});
@@ -250,7 +285,7 @@ function drawAll() {
 }
 const j = u => fetch(u).then(r => r.json());
 async function loadHistory() {
-  [hist, strikes] = await Promise.all([j(`/api/history?hours=${hours}`), j(`/api/strikes?hours=${hours}`)]);
+  [hist, strikes, candles] = await Promise.all([j(`/api/history?hours=${hours}`), j(`/api/strikes?hours=${hours}`), j(`/api/wind_candles?hours=${hours}`)]);
   if (document.body.classList.contains("live")) live = await j("/api/rapid?minutes=30");
   drawAll();
 }
