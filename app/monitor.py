@@ -81,6 +81,10 @@ class Config:
     normal_nws_min: float = env("NORMAL_NWS_MIN", 5, float)
     alert_hail_min_in: float = env("ALERT_HAIL_MIN_IN", 0.0, float)  # NWS hail size that triggers an alert
     hail_cooldown_min: float = env("HAIL_COOLDOWN_MIN", 15, float)
+    # the Tempest's hail flag alone is unreliable (heavy rain can trip it), so it needs backing up
+    hail_confirm: bool = env("HAIL_STATION_CONFIRM", "true").lower() in ("1", "true", "yes", "on")
+    hail_confirm_minutes: int = env("HAIL_CONFIRM_MINUTES", 3, int)       # hail-flagged minutes within 10 min
+    hail_confirm_lightning_mi: float = env("HAIL_CONFIRM_LIGHTNING_MI", 15, float)  # and a thunderstorm this close
     # hail shield (smart plug powering an inflatable car cover)
     shield_enabled: bool = env("HAIL_SHIELD", "true").lower() in ("1", "true", "yes", "on")
     shield_on_watch: bool = env("HAIL_SHIELD_ON_WATCH", "true").lower() in ("1", "true", "yes", "on")
@@ -355,11 +359,16 @@ class Monitor:
         self.cooldowns["hail"] = now
         kind = "Hail with rain" if row["precip_type"] == 3 else "Hail"
         when = datetime.fromtimestamp(row["ts"], ZoneInfo(CFG.tz)).strftime("%-I:%M %p")
-        self.log_event("alert:hail", f"Hail at station: {kind} detected · {when}")
+        n, ok, why = self.station_hail()
+        if not ok:
+            self.log_event("hail", f"Possible hail at station (unconfirmed) · {when} · {why}")
+            self.push("hail", dict(ts=row["ts"], kind=kind, confirmed=False))
+            asyncio.get_event_loop().call_soon(self.evaluate)
+            return
+        self.log_event("alert:hail", f"Hail at station: {kind} · {when} · {why}")
         asyncio.get_event_loop().create_task(self.send_ifttt(
-            "hail", f"{kind} detected at {self.station.get('name') or 'your station'}", when,
-            f"rain {self.rain_rate_inhr():.2f} in/hr, gust {ms_to_mph(row['wind_gust']) or 0:.0f} mph"))
-        self.push("hail", dict(ts=row["ts"], kind=kind))
+            "hail", f"{kind} at {self.station.get('name') or 'your station'}", when, why))
+        self.push("hail", dict(ts=row["ts"], kind=kind, confirmed=True))
         asyncio.get_event_loop().call_soon(self.evaluate)
 
     def ingest_rapid(self, ob, source):
@@ -471,8 +480,9 @@ class Monitor:
         rained = self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND rain_mm>0", (self.since(sl),))[0]["n"]
         if rained or now - self.last_precip_evt < sl:
             storm.append("rain falling")
-        if self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND precip_type IN (2,3)", (self.since(sl),))[0]["n"]:
-            storm.insert(0, "hail detected")
+        n, ok, _ = self.station_hail()
+        if n:
+            storm.insert(0, "hail confirmed" if ok else "possible hail (unconfirmed)")
         d15, n15 = self.nearest_strike_mi(sl)
         if d15 is not None and d15 <= CFG.storm_lightning_mi:
             storm.append(f"lightning {d15:.0f} mi")
@@ -518,18 +528,35 @@ class Monitor:
         self.update_shield()
 
     # --------------------------------------------------------------- hail shield (smart plug)
+    def nws_hail(self):
+        return [a for a in self.nws if a.get("hail_in") is not None and not (a["hail_in"] and a["hail_in"] < CFG.shield_min_in)
+                and ("Warning" in a["event"] or (CFG.shield_on_watch and "Watch" in a["event"]))]
+
+    def station_hail(self):
+        """(flagged minutes in last 10 min, confirmed?, explanation). The Tempest flags hail from impacts on its
+        sensor; very heavy rain can do the same, so on its own it only counts as 'possible hail'."""
+        n10 = self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND precip_type IN (2,3)", (self.since(600),))[0]["n"]
+        recent = self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND precip_type IN (2,3)",
+                           (self.since(max(CFG.storm_lookback_min, 15) * 60),))[0]["n"]
+        if not recent:
+            return 0, False, ""
+        if not CFG.hail_confirm:
+            return recent, True, "station hail sensor"
+        if self.nws_hail():
+            return recent, True, "station + NWS hail alert"
+        if self.cam.get("last_new_ts") and time.time() - self.cam["last_new_ts"] < 15 * 60:
+            return recent, True, "station + hail camera"
+        d, _ = self.nearest_strike_mi(1800)
+        if n10 >= CFG.hail_confirm_minutes and d is not None and d <= CFG.hail_confirm_lightning_mi:
+            return recent, True, f"station ({n10} min flagged) + lightning {d:.0f} mi"
+        return recent, False, f"{recent} min flagged, no NWS hail alert or nearby thunderstorm"
+
     def hail_threats(self):
         """Reasons hail is expected or happening right now (empty list = none)."""
-        out = []
-        for a in self.nws:
-            h = a.get("hail_in")
-            if h is None or (h and h < CFG.shield_min_in):
-                continue
-            if "Warning" in a["event"] or (CFG.shield_on_watch and "Watch" in a["event"]):
-                out.append(f"{a['event']}" + (f" ({h:.2f} in hail)" if h else " (hail)"))
-        if self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND precip_type IN (2,3)",
-                     (self.since(max(CFG.storm_lookback_min, 15) * 60),))[0]["n"]:
-            out.append("hail detected at station")
+        out = [f"{a['event']}" + (f" ({a['hail_in']:.2f} in hail)" if a["hail_in"] else " (hail)") for a in self.nws_hail()]
+        n, ok, why = self.station_hail()
+        if n and ok:
+            out.append(f"hail confirmed: {why}")
         if self.cam.get("last_new_ts") and time.time() - self.cam["last_new_ts"] < 15 * 60:
             out.append(f"hail on camera (up to {self.hail_det.max_mm:.0f} mm)")
         return out
@@ -546,8 +573,10 @@ class Monitor:
                 sh["clear_since"] = None
                 want, why = True, "; ".join(threats)
             elif sh["on"]:
-                # keep it up through the rest of the storm, then wait the off-delay
-                if self.mode == "storm":
+                # stay up while a thunderstorm is still close or a severe warning is active, then wait the off-delay
+                d, _ = self.nearest_strike_mi(1800)
+                severe = any(a["event"] in NWS_STORM_EVENTS for a in self.nws)
+                if severe or (d is not None and d <= CFG.storm_lightning_mi):
                     sh["clear_since"] = None
                 elif not sh["clear_since"]:
                     sh["clear_since"] = now

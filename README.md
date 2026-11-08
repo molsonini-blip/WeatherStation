@@ -84,13 +84,28 @@ outdoor smart plugs. storm_end → push a notification with the totals. high_win
 IFTTT's **WeatherFlow / Tempest** service has its own triggers, such as rain detected and lightning detected.
 Use these as a backup that keeps working even if your server is down.
 
+## How hail is decided
+
+The Tempest flags hail from impacts on its sensor, and very heavy rain can trip it, so a hail flag on its own is logged as
+**possible hail (unconfirmed)** and does nothing else. Hail counts as confirmed, and can send `tempest_hail` and inflate
+the car cover, only when one of these backs it up:
+
+- an NWS warning (or watch, if `HAIL_SHIELD_ON_WATCH`) that mentions hail for your location,
+- the hail camera sees stones (when installed),
+- the sensor flags hail in at least `HAIL_CONFIRM_MINUTES` (3) of the last 10 minutes **and** lightning is within
+  `HAIL_CONFIRM_LIGHTNING_MI` (15 mi) in the last 30 minutes.
+
+Set `HAIL_STATION_CONFIRM=false` to trust the sensor alone. Once nothing points to hail, the cover stays up only while a
+thunderstorm is still within `STORM_LIGHTNING_MI` or a severe-weather warning is active; plain rain doesn't hold it up.
+Then it deflates after `HAIL_SHIELD_OFF_DELAY_MIN` (60).
+
 ## Car hail cover (smart plug)
 
 The monitor can switch a smart plug that powers an inflatable car cover.
 
 - **Inflates** (`tempest_hail_shield_on`) as soon as hail is expected or happening:
   an NWS warning with hail for your location, an NWS watch that mentions hail (`HAIL_SHIELD_ON_WATCH`), or hail hitting your Tempest.
-- **Stays up** for the rest of the storm, then **deflates** (`tempest_hail_shield_off`) once no hail is expected and
+- **Stays up** while a thunderstorm is still close or a severe warning is active, then **deflates** (`tempest_hail_shield_off`) once no hail is expected and
   `HAIL_SHIELD_OFF_DELAY_MIN` (60 min) has passed. If hail returns in that hour, the timer resets.
 - **Dashboard control:** the Car hail cover card shows the status and has **Auto / On / Off** buttons.
   On and Off are manual overrides that pause automation until you pick Auto again. Use On to test the plug.
