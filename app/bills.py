@@ -91,16 +91,16 @@ def parse_date(s):
 
 
 def valid_period(start, end, today=None):
-    """A real billing period: 5-70 days long, ending no later than ~2 weeks from today."""
+    """A real billing period: 5-70 days long, ending no later than ~6 weeks from today (some bill a month ahead)."""
     try:
         s, e = date.fromisoformat(start), date.fromisoformat(end)
     except (TypeError, ValueError):
         return False
     today = today or date.today()
-    return 5 <= (e - s).days <= 70 and e <= today + timedelta(days=14) and e.year >= 2000
+    return 5 <= (e - s).days <= 70 and e <= today + timedelta(days=45) and e.year >= 2000
 
 
-PARSER_VERSION = 3  # bump when extract() changes: stored PDFs are re-read on the next start
+PARSER_VERSION = 4  # bump when extract() changes: stored PDFs are re-read on the next start
 
 
 def money(s):
@@ -216,12 +216,30 @@ def extract(text: str) -> dict:
             out["period_start"], out["period_end"] = s, e
             break
     m = (re.search(rf"amount due\s*on\s*({DATE_RE})", low)
-         or re.search(rf"(?:due date|payment due|pay by|due by|due on)[\s\S]{{0,60}}?({DATE_RE})", low))
+         or re.search(rf"(?:due date|payment due|pay by|due by|due on|autopay is scheduled for)[\s\S]{{0,60}}?({DATE_RE})", low))
     if m:
         out["due_date"] = parse_date(m.group(1))
-    m = re.search(rf"(?:bill|billing|statement|invoice) date:?\s*({DATE_RE})", low)
+    m = re.search(rf"(?:bill|billing|statement|invoice|issue) date:?\s*({DATE_RE})", low)
     if m:
         out["bill_date"] = parse_date(m.group(1))
+    # period written without a year (AT&T: "Monthly charges Oct 14 - Nov 13"): take the year from the bill date
+    ref = out.get("bill_date") or out.get("due_date")
+    if not out.get("period_end") and ref:
+        md = rf"((?:{MONTHS})[a-z]*\.? \d{{1,2}})"
+        for mm in re.finditer(rf"(?:monthly charges|charges|service|period|from)[^\n$]{{0,20}}?{md}{SEP}{md}(?![\d,])", low):
+            ry = date.fromisoformat(ref)
+            best = None
+            for y in (ry.year - 1, ry.year, ry.year + 1):  # the year that puts the period closest to the bill date
+                st, en = parse_date(f"{mm.group(1)} {y}"), parse_date(f"{mm.group(2)} {y}")
+                if st and en and en < st:
+                    en = parse_date(f"{mm.group(2)} {y + 1}")
+                if st and en and valid_period(st, en):
+                    d = abs((date.fromisoformat(st) - ry).days)
+                    if best is None or d < best[0]:
+                        best = (d, st, en)
+            if best:
+                out["period_start"], out["period_end"] = best[1], best[2]
+                break
     return out
 
 
@@ -276,6 +294,18 @@ def clean_fields(fields):
         fields["period_start"] = fields["period_end"] = None  # e.g. a model guess that is in the future
     fields["unit"] = fields.get("unit") or UNITS.get(fields.get("utility") or "", "")
     return fields
+
+
+def bill_month(b):
+    """YYYY-MM a bill counts toward: middle of the service period, else the period end / bill date / due date."""
+    try:
+        if b.get("period_start") and b.get("period_end"):
+            s, e = date.fromisoformat(b["period_start"]), date.fromisoformat(b["period_end"])
+            return (s + (e - s) / 2).isoformat()[:7]
+    except ValueError:
+        pass
+    d = b.get("period_end") or b.get("bill_date") or b.get("due_date")
+    return d[:7] if d else None
 
 
 class Bills:
@@ -396,12 +426,15 @@ class Bills:
                 if not name.lower().endswith(".pdf"):
                     continue
                 rel = f"{rel_dir}/{name}" if rel_dir else name
-                st = smbclient.stat(f"{dirpath}\\{name}", port=port)
-                key = f"{rel}|{st.st_size}"
-                if key in seen:
-                    continue
-                with smbclient.open_file(f"{dirpath}\\{name}", mode="rb", port=port) as fh:
-                    new.append((key, rel, fh.read()))
+                try:
+                    st = smbclient.stat(f"{dirpath}\\{name}", port=port)
+                    key = f"{rel}|{st.st_size}"
+                    if key in seen:
+                        continue
+                    with smbclient.open_file(f"{dirpath}\\{name}", mode="rb", port=port) as fh:
+                        new.append((key, rel, fh.read()))
+                except Exception as e:  # being copied or renamed right now: pick it up next time
+                    log.info("skipping %s for now: %s", rel, str(e).splitlines()[0][:120])
                 if len(new) >= 40:  # big first import: take it in batches
                     return new
         return new
@@ -516,9 +549,19 @@ class Bills:
 
     def monthly(self):
         """Cost per utility per month (by billing period end), plus weather for the same months."""
-        rows = self.db.q("""SELECT substr(COALESCE(period_end, bill_date),1,7) month, utility, SUM(amount) amount, SUM(usage) usage
-                            FROM bills WHERE amount IS NOT NULL AND COALESCE(period_end, bill_date) IS NOT NULL
-                            GROUP BY month, utility ORDER BY month""")
+        # a bill belongs to the month most of its service period falls in (the middle of the period), so a
+        # Sep 2 - Sep 29 bill and a Sep 30 - Nov 1 bill land in September and October, not both in September
+        agg = {}
+        for b in self.db.q("SELECT utility, amount, usage, period_start, period_end, bill_date, due_date FROM bills "
+                           "WHERE amount IS NOT NULL"):
+            m = bill_month(b)
+            if not m:
+                continue
+            a = agg.setdefault((m, b["utility"]), dict(month=m, utility=b["utility"], amount=0.0, usage=None))
+            a["amount"] = round(a["amount"] + b["amount"], 2)
+            if b["usage"] is not None:
+                a["usage"] = (a["usage"] or 0) + b["usage"]
+        rows = [agg[k] for k in sorted(agg)]
         wx = {r["month"]: r for r in self.db.q("""SELECT substr(day,1,7) month, AVG(t_avg) t_avg, MAX(t_hi) t_hi,
                  SUM(CASE WHEN t_avg>65 THEN t_avg-65 ELSE 0 END) cdd, SUM(CASE WHEN t_avg<65 THEN 65-t_avg ELSE 0 END) hdd,
                  SUM(rain_in) rain FROM daily WHERE source='out' GROUP BY month""")}
