@@ -1273,11 +1273,12 @@ function renderDetail() {
       <svg class="viz" id="pBalChart" style="height:220px"></svg>` : `<p class="sub">No mortgage statements for this property${p.loans.length ? " recently" : ""}.</p>`}
     <h3>Property tax &amp; insurance <span class="legend"><span><i class="sq" style="background:var(--c2)"></i>Tax</span><span><i class="sq" style="background:var(--c1)"></i>Insurance</span></span></h3>
     <svg class="viz" id="pTiChart" style="height:200px"></svg>
-    <div style="overflow:auto"><table class="tight"><tr><th>Year</th><th>Property tax</th><th>vs prior year</th><th>Insurance</th><th>vs prior year</th><th>Source</th></tr>
+    <div style="overflow:auto"><table class="tight"><tr><th>Year</th><th>Property tax</th><th>vs prior year</th><th>Insurance</th><th>vs prior year</th><th>Mortgage interest</th><th>Source</th></tr>
       ${ys.slice().reverse().map(y => { const t = by[y].tax, n = by[y].insurance, pt = by[y - 1] && by[y - 1].tax, pn = by[y - 1] && by[y - 1].insurance;
         return `<tr><td>${y}</td><td>${t ? usd(t.amount, 2) + (t.estimate ? ' <span class="sub">est.</span>' : "") : "--"}</td><td>${t && pt ? pct(t.amount, pt.amount) : ""}</td>
           <td>${n ? usd(n.amount, 2) + (n.estimate ? ' <span class="sub">est.</span>' : "") : "--"}</td><td>${n && pn ? pct(n.amount, pn.amount) : ""}</td>
-          <td class="sub">${[...new Set([t, n].filter(Boolean).map(x => ({escrow: "escrow statement", statement: "mortgage statement", manual: "entered"})[x.source]))].join(", ")}</td></tr>`; }).join("") || `<tr><td colspan="6" class="sub">Nothing yet.</td></tr>`}</table></div>
+          <td>${by[y].interest ? usd(by[y].interest.amount, 2) : "--"}</td>
+          <td class="sub">${[...new Set([t, n].filter(Boolean).map(x => ({escrow: "escrow statement", statement: "mortgage statement", annual: "annual escrow statement", manual: "entered"})[x.source]))].join(", ")}</td></tr>`; }).join("") || `<tr><td colspan="7" class="sub">Nothing yet.</td></tr>`}</table></div>
     <div class="whatif">Add or correct a year:
       <select id="pcKind"><option value="tax">Property tax</option><option value="insurance">Insurance</option><option value="hoa">HOA</option></select>
       <input id="pcYear" inputmode="numeric" placeholder="Year" value="${new Date().getFullYear() - 1}"><input id="pcAmt" inputmode="decimal" placeholder="Amount $">
@@ -1339,7 +1340,7 @@ function drawDetail() {
     const x0 = Math.min(...ser.flatMap(s => s.rows.map(r => r.ts)));
     mchart($("pBalChart"), ser, {u: "", dec: 0, x0, x1, gap: 400 * 86400, points: false, tlabel: t => new Date(t * 1000).toLocaleDateString([], {month: "short", year: "numeric"})});
   }
-  const by = taxinsFor(p.id), ys = Object.keys(by).map(Number).sort();
+  const by = taxinsFor(p.id), ys = Object.keys(by).map(Number).filter(y => by[y].tax || by[y].insurance).sort();
   bars($("pTiChart"), ys.map(y => ({label: String(y), title: String(y) + ((by[y].tax || {}).estimate || (by[y].insurance || {}).estimate ? " (part estimated)" : ""),
     v: {tax: by[y].tax ? by[y].tax.amount : 0, insurance: by[y].insurance ? by[y].insurance.amount : 0}})),
     [{k: "tax", l: "Property tax", c: "var(--c2)"}, {k: "insurance", l: "Insurance", c: "var(--c1)"}], {money: true, dec: 2, empty: "No tax or insurance amounts yet"});

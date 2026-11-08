@@ -118,7 +118,9 @@ def kind_of(sq, path=""):
         return "owner"
     if re.search(r"utilit", p):
         return "bill"
-    stmt = re.search(r"principalbalance", sq) and re.search(r"amountdue|regular(?:monthly)?payment", sq)
+    if re.search(r"annualescrowandinterest|1098mortgageinterest|mortgageinterest(?:statement)?.{0,40}form1098|form1098.{0,200}mortgageinterest", sq):
+        return "annual"
+    stmt = re.search(r"principalbalance|outstandingprincipal", sq) and re.search(r"amountdue|regular(?:monthly)?payment", sq)
     if stmt and re.search(r"escrowbalance|interestrate", sq):
         return "statement"
     if re.search(r"escrow(?:account)?(?:review|analysis|disclosure)|escrowaccounthistory|yourescrowaccount|annualescrow"
@@ -141,17 +143,17 @@ def parse_statement(text: str) -> dict:
     if m:
         out["loan"] = "…" + m.group(1)[-4:]
     D = r"(\d{1,2}/\d{1,2}/\d{2,4})"
-    m = re.search(rf"statementdate:?{D}", sq) or re.search(rf"mortgagestatement{D}", sq) or re.search(rf"statementdate.{{0,60}}?{D}", sq)
+    m = re.search(rf"statement(?:creation)?date:?{D}", sq) or re.search(rf"mortgagestatement{D}", sq) or re.search(rf"statementdate.{{0,60}}?{D}", sq)
     if m:
         out["statement_date"] = pdate(m.group(1))
     m = re.search(rf"(?:paymentduedate|duedate):?{D}", sq)
     if m:
         out["due_date"] = pdate(m.group(1))
-    m = re.search(r"(?:interestbearingprincipalbalance|outstandingprincipalbalance|unpaidprincipalbalance|principalbalance)"
-                  r"\d?:?" + M, sq)
+    m = re.search(r"(?:interestbearingprincipalbalance|outstandingprincipalbalance|unpaidprincipalbalance|principalbalance"
+                  r"|outstandingprincipal)\d?:?" + M, sq)
     if m:
         out["balance"] = money(m.group(1))
-    m = re.search(r"interestrate:?(\d{1,2}\.\d{2,4})%", sq)
+    m = re.search(r"interestrate:?(\d{1,2}\.\d{2,5})%", sq)
     if m:
         out["rate"] = float(m.group(1))
     m = re.search(r"escrowbalance:?" + M, sq)
@@ -182,7 +184,7 @@ def parse_statement(text: str) -> dict:
             out["payment"], out["principal"], out["interest"] = pay, pv, iv
             out["escrow"] = round(pay - pv - iv, 2)
             break
-    m = re.search(r"escrowamount:taxes:" + M + r"insurance:" + M, sq)
+    m = re.search(r"escrowamount:taxes:" + M + r"insurance:" + M, sq) or re.search(r"escrowtaxes" + M + r"insurance" + M, sq)
     if m:
         out["tax_monthly"], out["ins_monthly"] = money(m.group(1)), money(m.group(2))
     m = re.search(r"escrowdisbursementsonyourbehalftaxespaid:" + M + r"insurancepaid:" + M, sq)
@@ -211,18 +213,40 @@ def parse_escrow(text: str):
     months = [(m.start(), f"{m.group(2)}-{MONTHS[m.group(1)]:02d}") for m in re.finditer(MONTH_RE, low)]
     items = {}
     for m in re.finditer(r"(-?\$?[\d,]+\.\d{2})\s*[a-z]?\*?\s*" + ITEM, low):
-        amt = abs(money(m.group(1).replace("$", "")))
-        if not amt:
-            continue
         desc = m.group(2)
         if re.search(r"mortgage insurance|pmi", low[max(0, m.start() - 20):m.end() + 5]):
             continue
-        before = [mo for pos, mo in months if pos < m.start() and m.start() - pos < 260]
+        before = [(pos, mo) for pos, mo in months if pos < m.start() and m.start() - pos < 260]
         if not before:
             continue
+        pos, mo = before[-1]
+        amts = [abs(money(a.replace("$", ""))) for a in re.findall(r"-?\$?[\d,]+\.\d{2}", low[pos:m.end()])]
+        # activity history (Mr. Cooper / Rocket): deposits actual, projected, difference, payments actual, projected,
+        # difference -> the actual payment is the 4th figure; elsewhere the figure right before the description
+        amt = amts[3] if len(amts) >= 6 else amts[-1] if amts else 0
+        if not amt:
+            continue
         kind = "tax" if "tax" in desc else "hoa" if "hoa" in desc else "insurance"
-        items[(before[-1], kind)] = (before[-1], kind, desc.strip().title(), amt)
+        items[(mo, kind)] = (mo, kind, desc.strip().title(), amt)
     return list(items.values())
+
+
+def parse_annual(text: str):
+    """Annual escrow and interest statement / Form 1098: (year, {tax, insurance, interest})."""
+    sq = squash(text)
+    m = re.search(r"(?<!tax)year:(20\d\d)", sq) or re.search(r"taxyear:(20\d\d)", sq) or re.search(r"forcalendaryear(?:\|)?(20\d\d)", sq) or re.search(r"calendaryear\D{0,40}(20\d\d)", sq)
+    if not m:
+        return None, {}
+    vals = {}
+    for kind, pat in (("tax", r"(?:property|county|realestate|school)taxes?(?:paid)?:?" + M),
+                      ("insurance", r"(?:hazard|homeowners?|property|flood)insurance(?:paid)?:?" + M),
+                      ("interest", r"interestpaid:?" + M)):
+        mm = re.search(pat, sq)
+        if mm and money(mm.group(1)):
+            vals[kind] = money(mm.group(1))
+    ln = re.search(r"(?:loannumber|acct#):?(\d{6,})", sq)
+    vals["_loan"] = ln.group(1)[-4:] if ln else "loan"
+    return int(m.group(1)), vals
 
 
 def statement_date_escrow(text):
@@ -386,7 +410,7 @@ class Properties:
         folder = rel.replace("\\", "/").split("/")[0] if "/" in rel.replace("\\", "/") else None
         if kind == "owner":
             return self.ingest_owner(text, rel, data)
-        key = address_key(sq) if kind in ("statement", "escrow") else None
+        key = address_key(sq) if kind in ("statement", "escrow", "annual") else None
         fkey = key_from_name(folder)
         if not property_id:
             # the statement's own property address wins; the folder name names it and covers bills
@@ -401,8 +425,27 @@ class Properties:
             return None
         safe = re.sub(r"[^\w.\- ]", "_", rel.replace("/", " - "))[-120:]
         fname = f"{int(time.time())}-{safe}"
+        if kind == "annual":
+            year, vals = parse_annual(text)
+            if not year or not vals:
+                log.info("properties: %s - annual statement without escrow or interest figures, skipped", rel)
+                return None
+            (self.dir / fname).write_bytes(data)
+            loan = vals.pop("_loan")
+            if not vals:
+                return None
+            for k, v in vals.items():  # one row per loan: after a servicing transfer each servicer reports its part of the year
+                self.db.x("INSERT INTO escrow_items (property_id, month, kind, description, amount, estimate, source_date, file) "
+                          "VALUES (?,?,?,?,?,0,?,?) ON CONFLICT(property_id, month, kind) DO UPDATE SET amount=excluded.amount",
+                          (property_id, f"{year}-00 {loan}", k, "Annual escrow & interest statement", v, f"{year}-12-31", fname))
+            self.mon.log_event("properties", f"Annual escrow statement {year}: {self.name(property_id)}")
+            self.mon.push("properties", {})
+            return property_id
         if kind == "statement":
             f = parse_statement(text)
+            if f["balance"] is None or f["statement_date"] is None:
+                log.info("properties: %s mentions a loan but isn't a statement (notice / letter) - skipped", rel)
+                return None
             dup = self.db.q("SELECT id FROM loan_statements WHERE property_id=? AND statement_date=? AND COALESCE(loan,'')=?",
                             (property_id, f["statement_date"], f["loan"] or ""))
             if dup and f["statement_date"]:
@@ -493,7 +536,9 @@ class Properties:
         for r in self.db.q("SELECT DISTINCT file, property_id FROM escrow_items"):
             p = self.dir / r["file"]
             if p.is_file():
-                text = await loop.run_in_executor(None, bills_mod.pdf_text, p.read_bytes())
+                text = await loop.run_in_executor(None, bills_mod.pdf_text, p.read_bytes(), 40)
+                if kind_of(squash(text)) != "escrow":
+                    continue
                 self.store_escrow(r["property_id"], parse_escrow(text), statement_date_escrow(text), r["file"])
                 n += 1
         return n
@@ -595,15 +640,21 @@ class Properties:
         """Property tax and insurance per property per year: hand entries > escrow payments > statement year-to-date."""
         res = {}
         for r in self.db.q("SELECT property_id, substr(month,1,4) y, kind, SUM(amount) amt, MAX(estimate) est "
-                           "FROM escrow_items WHERE kind IN ('tax','insurance') GROUP BY property_id, y, kind"):
+                           "FROM escrow_items WHERE kind IN ('tax','insurance') AND month NOT LIKE '____-00%' GROUP BY property_id, y, kind"):
             res[(r["property_id"], int(r["y"]), r["kind"])] = dict(amount=round(r["amt"], 2), source="escrow", estimate=bool(r["est"]))
+        # the servicer's annual statement is the actual total for the year (a part year after a servicing transfer)
+        for r in self.db.q("SELECT property_id, substr(month,1,4) y, kind, SUM(amount) amount FROM escrow_items "
+                           "WHERE month LIKE '____-00%' GROUP BY property_id, y, kind"):
+            k = (r["property_id"], int(r["y"]), r["kind"])
+            if k not in res or res[k]["estimate"] or r["amount"] >= res[k]["amount"] - 0.01:
+                res[k] = dict(amount=round(r["amount"], 2), source="annual", estimate=False)
         for s in self.db.q("SELECT property_id, statement_date, taxes_ytd, insurance_ytd FROM loan_statements "
                            "WHERE statement_date IS NOT NULL AND (taxes_ytd IS NOT NULL OR insurance_ytd IS NOT NULL)"):
             d = date.fromisoformat(s["statement_date"])
             y = date.fromordinal(d.toordinal() - 5).year  # a Jan 2 statement's year-to-date is last year
             for kind, v in (("tax", s["taxes_ytd"]), ("insurance", s["insurance_ytd"])):
                 k = (s["property_id"], y, kind)
-                if v and (k not in res or (res[k]["source"] == "statement" and v > res[k]["amount"])):
+                if v and (k not in res or res[k]["estimate"] or (res[k]["source"] == "statement" and v > res[k]["amount"])):
                     res[k] = dict(amount=v, source="statement", estimate=False)
         for c in self.db.q("SELECT property_id, year, kind, SUM(amount) amt FROM property_costs GROUP BY property_id, year, kind"):
             res[(c["property_id"], c["year"], c["kind"])] = dict(amount=c["amt"], source="manual", estimate=False)
