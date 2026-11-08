@@ -102,6 +102,11 @@ class Config:
     history_backfill_delay_s: float = env("HISTORY_BACKFILL_DELAY_S", 2, float)
     backup_keep_days: int = env("BACKUP_KEEP_DAYS", 14, int)
     backup_keep_months: int = env("BACKUP_KEEP_MONTHS", 24, int)
+    backup_smb_path: str | None = env("BACKUP_SMB_PATH")  # e.g. //readyshare/Data/WeatherStation
+    backup_smb_host: str | None = env("BACKUP_SMB_HOST")  # optional IP if the name doesn't resolve
+    backup_smb_user: str = env("BACKUP_SMB_USER", "guest")
+    backup_smb_password: str = env("BACKUP_SMB_PASSWORD", "")
+    backup_smb_port: int = env("BACKUP_SMB_PORT", 445, int)
     # hail camera (Reolink + printed size markers on a dark plate)
     hailcam_host: str | None = env("HAILCAM_HOST")
     hailcam_user: str = env("HAILCAM_USER", "admin")
@@ -194,6 +199,26 @@ def hail_name(inches):
         if inches >= size:
             return name
     return "pea"
+
+
+def resolve_share_host(host):
+    """Find the file server. Netgear's ReadySHARE name often isn't in DNS, so also try
+    readyshare.routerlogin.net and finally the default gateway (the router serves ReadySHARE itself)."""
+    tries = [host] + ([f"{host}.routerlogin.net"] if host.lower() == "readyshare" else [])
+    for name in tries:
+        try:
+            return socket.gethostbyname(name)
+        except OSError:
+            pass
+    if host.lower() == "readyshare":
+        try:
+            for line in open("/proc/net/route").read().splitlines()[1:]:
+                f = line.split()
+                if f[1] == "00000000" and f[2] != "00000000":
+                    return socket.inet_ntoa(int(f[2], 16).to_bytes(4, "little"))
+        except OSError:
+            pass
+    raise RuntimeError(f"can't find '{host}' on the network; set BACKUP_SMB_HOST to its IP address")
 
 
 # ----------------------------------------------------------------------------- storage
@@ -1268,6 +1293,54 @@ class Monitor:
             if f not in keep:
                 f.unlink()
         log.info("database backed up to %s", dst)
+        if CFG.backup_smb_path:
+            self.backup_to_share(bdir)
+
+    def backup_to_share(self, bdir):
+        """Mirror data/backups/ to a network share (e.g. the router's ReadySHARE drive)."""
+        import io
+        from smb.SMBConnection import SMBConnection
+        parts = CFG.backup_smb_path.replace("\\", "/").strip("/").split("/")
+        host, share, folder = parts[0], parts[1], "/".join(parts[2:])
+        status = dict(ts=int(time.time()), target=CFG.backup_smb_path, ok=False)
+        try:
+            ip = CFG.backup_smb_host or resolve_share_host(host)
+            conn = SMBConnection(CFG.backup_smb_user, CFG.backup_smb_password, "tempest-monitor", host.upper(),
+                                 use_ntlm_v2=True, is_direct_tcp=CFG.backup_smb_port == 445)
+            if not conn.connect(ip, CFG.backup_smb_port, timeout=30):
+                raise RuntimeError(f"could not log in to {host} ({ip})")
+            path = ""
+            for seg in [x for x in folder.split("/") if x]:  # create the folder tree if needed
+                path = f"{path}/{seg}"
+                try:
+                    conn.listPath(share, path)
+                except Exception:
+                    conn.createDirectory(share, path)
+            remote = {f.filename: f.file_size for f in conn.listPath(share, path or "/") if not f.isDirectory}
+            local = {f.name: f for f in sorted(bdir.glob("tempest-*.db"))}
+            sent = 0
+            for name, f in local.items():
+                if remote.get(name) != f.stat().st_size:
+                    with open(f, "rb") as fh:
+                        conn.storeFile(share, f"{path}/{name}", fh)
+                    sent += 1
+            removed = 0
+            for name in remote:
+                if name.startswith("tempest-") and name.endswith(".db") and name not in local:
+                    conn.deleteFiles(share, f"{path}/{name}")
+                    removed += 1
+            conn.storeFile(share, f"{path}/README.txt", io.BytesIO(
+                b"Tempest Monitor database backups (SQLite). Open with DB Browser for SQLite, or copy one back to\n"
+                b"the EdgeXpert as data/tempest.db to restore. Managed automatically: daily copies plus one per month.\n"))
+            conn.close()
+            status.update(ok=True, files=len(local), sent=sent, removed=removed)
+            log.info("backups mirrored to %s (%d sent, %d removed)", CFG.backup_smb_path, sent, removed)
+        except Exception as e:
+            status["error"] = str(e)[:200]
+            log.warning("network backup to %s failed: %s", CFG.backup_smb_path, e)
+            self.log_event("backup", f"Network backup failed: {status['error']}")
+        self.db.kv_set("backup_status", status)
+        return status
 
     async def daily_loop(self):
         hh, mm = map(int, CFG.daily_summary_time.split(":"))
@@ -1596,7 +1669,8 @@ def build_app(mon: Monitor):
                             first=r["first"], last=r["last"], days=r["days"],
                             metrics=list(METRICS) if src == "out" else ["temp", "humidity"]))
         out.sort(key=lambda x: (x["id"] != "out", x["name"].lower()))
-        return web.json_response(dict(sources=out, backfill=mon.db.kv_get("backfill", {})))
+        return web.json_response(dict(sources=out, backfill=mon.db.kv_get("backfill", {}),
+                                      backup=dict(mon.db.kv_get("backup_status", {}) or {}, target=CFG.backup_smb_path)))
 
     async def hist_yoy(req):
         src, metric = req.query.get("source", "out"), req.query.get("metric", "temp")
@@ -1649,6 +1723,12 @@ def build_app(mon: Monitor):
     r.add_get("/api/history/yoy", hist_yoy)
     r.add_get("/api/history/summary", hist_summary)
     r.add_get("/api/history/export.csv", hist_export)
+
+    async def backup_now(_):
+        await asyncio.get_running_loop().run_in_executor(None, mon.backup_db)
+        return web.json_response(mon.db.kv_get("backup_status", {}) or dict(ok=True, target=None))
+
+    r.add_post("/api/backup", backup_now)
     r.add_get("/api/hailcam/image", hailcam_image)
     r.add_post("/api/hailcam/test", hailcam_test)
     r.add_static("/static", STATIC)

@@ -249,7 +249,7 @@ td.hl{font-weight:650}
   <main id="pgHistory" hidden>
     <div class="grid">
       <div class="hctl"><label for="hSrc" class="sub">Sensor</label><select id="hSrc"></select>
-        <div class="seg" id="hMetric"></div><span style="flex:1"></span><a id="hCsv" href="/api/history/export.csv">Download CSV</a></div>
+        <div class="seg" id="hMetric"></div><span style="flex:1"></span><span class="sub" id="hBk"></span><button id="hBkBtn">Back up now</button><a id="hCsv" href="/api/history/export.csv">Download CSV</a></div>
       <div class="notice card" id="hNote" style="display:none"></div>
       <div class="recs" id="hRecs"></div>
       <section class="card chart wide"><div class="head"><h2 id="hTitle">Year over year</h2><span class="legend" id="hLeg"></span></div>
@@ -766,7 +766,7 @@ const doy = md => CUM[+md.slice(0, 2) - 1] + +md.slice(3) - 1;            // 0..
 const doyLabel = t => { const d = Math.round(t / 86400); let m = 11; while (m > 0 && CUM[m] > d) m--; return `${MONTHS[m]} ${d - CUM[m] + 1}`; };
 let hSources = [], hSrc = "out", hMetric = "temp", hData = null, hSum = null, hBackfill = null;
 async function loadHistoryPage() {
-  try { const r = await j("/api/history/sources"); hSources = r.sources; hBackfill = r.backfill; } catch (e) { return; }
+  try { const r = await j("/api/history/sources"); hSources = r.sources; hBackfill = r.backfill; showBackup(r.backup); } catch (e) { return; }
   if (!hSources.find(x => x.id === hSrc)) hSrc = (hSources[0] || {}).id || "out";
   $("hSrc").innerHTML = hSources.map(x => `<option value="${escapeHtml(x.id)}"${x.id === hSrc ? " selected" : ""}>${escapeHtml(x.name)}</option>`).join("");
   await loadYoy();
@@ -826,6 +826,13 @@ function renderSummary() {
       const ext = vals.filter(v => v != null), best = ext.length > 1 ? Math.max(...ext) : null;
       return `<tr><td>${m}</td>${vals.map(v => `<td class="n${v != null && v === best ? " hl" : ""}">${v == null ? "" : fmt(v, mv[1]) + mv[2]}</td>`).join("")}${years.length > 1 ? `<td class="n">${a != null && b != null ? (a - b >= 0 ? "+" : "") + fmt(a - b, mv[1]) + mv[2] : ""}</td>` : ""}</tr>`; }).join("");
 }
+function showBackup(b) {
+  if (!b || !b.target) { $("hBk").textContent = "Backups: on the EdgeXpert only"; return; }
+  $("hBk").textContent = !b.ts ? `Backups → ${b.target}: first copy tonight` : b.ok ? `Last backup to ${b.target}: ${ago(b.ts)} ✓` : `⚠ Backup to ${b.target} failed ${ago(b.ts)}: ${b.error}`;
+}
+$("hBkBtn").onclick = async () => { $("hBkBtn").textContent = "Backing up…";
+  const r = await fetch("/api/backup", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
+  $("hBkBtn").textContent = "Back up now"; showBackup(r.target === undefined ? null : r); };
 $("hSrc").onchange = e => { hSrc = e.target.value; loadYoy(); };
 $("hMetric").onclick = e => { const b = e.target.closest("button"); if (b) { hMetric = b.dataset.m; loadYoy(); } };
 

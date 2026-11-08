@@ -141,8 +141,11 @@ Nothing is ever pruned except the 3-second wind samples outside of storms.
   total), all-time records, a by-year table (rain days, 100°F days, freeze days, hail days…) and a month-by-year table with the
   change from last year. **Download CSV** exports the daily table for Excel. YoLink cards link straight to their history.
 - **Backups:** every night after the daily summary, a copy of the database goes to `data/backups/`
-  (last `BACKUP_KEEP_DAYS`=14 days plus one per month for `BACKUP_KEEP_MONTHS`=24 months). Copy that folder somewhere
-  off the EdgeXpert from time to time.
+  (last `BACKUP_KEEP_DAYS`=14 days plus one per month for `BACKUP_KEEP_MONTHS`=24 months).
+  With `BACKUP_SMB_PATH=//readyshare/Data/WeatherStation` that folder is mirrored to the network share every night
+  (only new or changed files are copied; old ones are removed to match). Guest access is used unless you set
+  `BACKUP_SMB_USER` / `BACKUP_SMB_PASSWORD`. If the name doesn't resolve, the router's address is tried, or set
+  `BACKUP_SMB_HOST`. The History tab shows the last backup and has a **Back up now** button.
 
 ## Hail camera (Reolink + AI measurement)
 
