@@ -371,7 +371,7 @@ table.tight td,table.tight th{padding:4px 8px}
       <div class="ptiles" id="pTiles"></div>
       <section class="card wide" style="grid-column:span 12"><div class="head"><h2>Mortgage payoff timeline</h2><span class="now" id="pFree"></span></div>
         <svg class="tl" id="pTimeline"></svg>
-        <div class="sub">From today to each loan's payoff at the current payment (balance, rate and principal + interest from the latest statement). Tick = loan maturity date where the statement shows one.</div></section>
+        <div class="sub">From today to each loan's payoff (balance, rate and principal + interest from the latest statement). Where you've been paying extra principal, the solid bar is your recent pace and the faint bar the scheduled payments only. Tick = maturity date where the statement shows one.</div></section>
       <div class="pcards" id="pCards"></div>
       <section class="card" id="pDetail" style="grid-column:span 12" hidden></section>
       <section class="card chart wide" style="grid-column:span 12"><div class="head"><h2>Rent collected by year</h2><span class="legend" id="pRentLeg"></span><span class="now" id="pRentNow"></span></div><svg class="viz" id="pRentChart" style="height:230px"></svg></section>
@@ -1206,7 +1206,7 @@ function renderProps() {
   const pi = loans.reduce((a, l) => a + (l.pi || 0), 0), esc = loans.reduce((a, l) => a + (l.statement.escrow_balance || 0), 0);
   const ti = pSum.taxins, lastY = k => ti.filter(t => !t.estimate && t.kind === k).map(t => t.year).sort().pop(), ly = lastY("tax"), li = lastY("insurance");
   const sumY = (y, k) => ti.filter(t => t.year === y && t.kind === k).reduce((a, t) => a + t.amount, 0);
-  const last = loans.map(l => l.payoff_date).filter(Boolean).sort().pop();
+  const last = loans.map(l => l.pace_date || l.payoff_date).filter(Boolean).sort().pop();
   $("pTiles").innerHTML = [
     ["Mortgage balance", usd(bal), `${loans.length} loan${loans.length === 1 ? "" : "s"} · ${P.length} properties`],
     ["Monthly payments", usd(pay), `${usd(pi)} principal &amp; interest · ${usd(pay - pi)} escrow`],
@@ -1229,7 +1229,8 @@ function renderProps() {
       <h2>${escapeHtml(p.name)} <span class="tag ${k[1]}">${k[0]}</span>${p.occupancy === "vacant" ? `<span class="tag vac">Vacant</span>` : ""}</h2>
       ${s ? `<div class="amt">${usd(p.balance)} <small>owed</small></div>
         <div class="meta"><span><b>${fmt(s.rate, 3)}%</b> · ${escapeHtml(s.servicer || "")}</span><span>Payment <b>${usd(s.payment, 2)}</b></span></div>
-        <div class="meta"><span>Paid off <b>${l.payoff_date ? monthYear(l.payoff_date) : "--"}</b>${l.months_left ? ` · ${Math.floor(l.months_left / 12)} y ${l.months_left % 12} m` : ""}</span><span>Escrow ${usd(s.escrow_balance)}</span></div>`
+        <div class="meta">${l.pace_date ? `<span>Paid off <b>${monthYear(l.pace_date)}</b> at your pace · ${Math.floor(l.pace_months / 12)} y ${l.pace_months % 12} m</span><span>(+${usd(l.extra)}/mo extra)</span>`
+          : `<span>Paid off <b>${l.payoff_date ? monthYear(l.payoff_date) : "--"}</b>${l.months_left ? ` · ${Math.floor(l.months_left / 12)} y ${l.months_left % 12} m` : ""}</span>`}<span>Escrow ${usd(s.escrow_balance)}</span></div>`
         : `<div class="amt" style="color:var(--ink-2)">${p.loans.length ? "Paid off" : "No mortgage"}</div><div class="meta"><span>${p.loans.length ? "" : "No statements yet"}</span></div>`}
       <div class="meta"><span>Tax ${y || ""} <b>${tax ? usd(tax.amount) : "--"}</b> ${tax && ptax ? pct(tax.amount, ptax.amount) : ""}</span><span>Insurance ${yi || ""} <b>${ins ? usd(ins.amount) : "--"}</b> ${ins && pins ? pct(ins.amount, pins.amount) : ""}</span></div>
       ${(() => { const r = rentStats(p.id); return r ? `<div class="meta"><span>Rent <b>${usd(r.rentMo)}</b>/mo</span><span>Cash flow <b class="${r.cash < 0 ? "up" : "down"}">${usd(r.cashMo)}</b>/mo</span></div>` : ""; })()}
@@ -1260,16 +1261,20 @@ function renderDetail() {
       <div class="meta"><span>Principal <b>${usd(s.principal, 2)}</b></span><span>Interest <b>${usd(s.interest, 2)}</b></span><span>Escrow <b>${usd(s.escrow, 2)}</b></span><span>Total <b>${usd(s.payment, 2)}</b></span></div>
       ${s.tax_monthly != null ? `<div class="meta"><span>Escrow for taxes <b>${usd(s.tax_monthly, 2)}</b>/mo</span><span>insurance <b>${usd(s.ins_monthly, 2)}</b>/mo</span></div>` : ""}
       <div class="meta"><span>Escrow balance <b>${usd(s.escrow_balance, 2)}</b></span>${s.interest_ytd != null ? `<span>Interest paid this year <b>${usd(s.interest_ytd, 2)}</b></span>` : ""}</div></div>
-      <div><div class="sub">Payoff at the current payment</div><div class="big">${l.payoff_date ? monthYear(l.payoff_date) : "--"}</div>
-      <div class="meta"><span><b>${l.months_left ?? "--"}</b> payments left</span><span>Interest still to pay <b>${usd(l.interest_left)}</b></span></div>
-      <div class="whatif">Extra principal <input data-i="${i}" class="pxtra" inputmode="decimal" value="${pExtra[l.loan] || ""}" placeholder="$/month"><span class="pxout" data-i="${i}"></span></div></div></div>`; }).join("");
+      <div>${l.pace_date ? `<div class="sub">Payoff at your pace: you've been paying about <b style="color:var(--ink)">${usd(l.extra)}</b> a month extra principal</div>
+        <div class="big">${monthYear(l.pace_date)}</div>
+        <div class="meta"><span><b>${l.pace_months}</b> payments left</span><span>Interest still to pay <b>${usd(l.pace_interest)}</b></span></div>
+        <div class="meta"><span>Scheduled payment only: ${monthYear(l.payoff_date)} · ${usd(l.interest_left)} interest</span></div>`
+      : `<div class="sub">Payoff at the current payment</div><div class="big">${l.payoff_date ? monthYear(l.payoff_date) : "--"}</div>
+      <div class="meta"><span><b>${l.months_left ?? "--"}</b> payments left</span><span>Interest still to pay <b>${usd(l.interest_left)}</b></span></div>`}
+      <div class="whatif">${l.pace_date ? "Try a different extra" : "Extra principal"} <input data-i="${i}" class="pxtra" inputmode="decimal" value="${pExtra[l.loan] || ""}" placeholder="$/month"><span class="pxout" data-i="${i}"></span></div></div></div>`; }).join("");
   const ys = Object.keys(by).map(Number).sort();
   el.innerHTML = `<div class="head" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><h2 style="margin:0">${escapeHtml(p.name)}</h2>
       <span class="tag ${(PKIND[p.kind] || PKIND.rental)[1]}">${(PKIND[p.kind] || PKIND.rental)[0]}</span>${p.occupancy === "vacant" ? `<span class="tag vac">Vacant</span>` : ""}
       <span class="sub">${escapeHtml(p.address || "")}</span><span style="flex:1"></span>
       <button id="pEdit">Edit property</button><button id="pAddStmt">Add statement by hand</button><button id="pClose" aria-label="Close">✕</button></div>
     ${p.current.length ? `<h3>Mortgage</h3><div style="display:grid;gap:12px">${loanHtml}</div>
-      <h3>Balance <span class="legend"><span><i style="background:var(--c1)"></i>Statements</span><span><i style="background:var(--ink-3)"></i>Projected</span><span><i style="background:var(--good)"></i>With extra principal</span></span></h3>
+      <h3>Balance <span class="legend"><span><i style="background:var(--c1)"></i>Statements</span><span><i style="background:var(--ink-3)"></i>Scheduled</span>${p.current.some(l => l.extra) ? '<span><i style="background:var(--c4)"></i>At your pace</span>' : ""}<span><i style="background:var(--good)"></i>With extra principal</span></span></h3>
       <svg class="viz" id="pBalChart" style="height:220px"></svg>` : `<p class="sub">No mortgage statements for this property${p.loans.length ? " recently" : ""}.</p>`}
     <h3>Property tax &amp; insurance <span class="legend"><span><i class="sq" style="background:var(--c2)"></i>Tax</span><span><i class="sq" style="background:var(--c1)"></i>Insurance</span></span></h3>
     <svg class="viz" id="pTiChart" style="height:200px"></svg>
@@ -1314,7 +1319,7 @@ function whatIf(p) {
     const a = amort(l.statement.balance, l.statement.rate, l.pi, x, l.statement.due_date || new Date().toISOString().slice(0, 10));
     if (!a.n) { out.textContent = ""; return; }
     const pd = addMonths(l.statement.due_date, a.n - 1), saved = (l.months_left || 0) - a.n;
-    out.innerHTML = `paid off <b>${monthYear(pd)}</b> · ${Math.floor(saved / 12)} y ${saved % 12} m sooner · saves <b>${usd((l.interest_left || 0) - a.interest)}</b> interest`; });
+    out.innerHTML = `paid off <b>${monthYear(pd)}</b> · ${Math.floor(saved / 12)} y ${saved % 12} m sooner than scheduled · saves <b>${usd((l.interest_left || 0) - a.interest)}</b> interest`; });
 }
 async function loadPropBills(p) {
   let d; try { d = await j(`/api/properties/${p.id}/bills`); } catch (e) { return; }
@@ -1336,6 +1341,7 @@ function drawDetail() {
     let x1 = Date.now() / 1000;
     p.current.forEach(l => { const s = l.statement, st = s.due_date || s.statement_date;
       const a = amort(s.balance, s.rate, l.pi, 0, st); if (a.rows.length) { ser.push({l: "Projected", c: "var(--ink-3)", dash: "4 4", rows: a.rows}); x1 = Math.max(x1, a.rows[a.rows.length - 1].ts); }
+      if (l.extra) { const c = amort(s.balance, s.rate, l.pi, l.extra, st); if (c.rows.length) ser.push({l: "At your pace", c: "var(--c4)", rows: c.rows}); }
       const x = pExtra[l.loan]; if (x) { const b = amort(s.balance, s.rate, l.pi, x, st); if (b.rows.length) ser.push({l: "With extra principal", c: "var(--good)", rows: b.rows}); } });
     const x0 = Math.min(...ser.flatMap(s => s.rows.map(r => r.ts)));
     mchart($("pBalChart"), ser, {u: "", dec: 0, x0, x1, gap: 400 * 86400, points: false, tlabel: t => new Date(t * 1000).toLocaleDateString([], {month: "short", year: "numeric"})});
@@ -1347,7 +1353,7 @@ function drawDetail() {
 }
 function drawProps() {
   if (!pSum) return;
-  const P = pSum.properties, loans = P.flatMap((p, i) => p.current.filter(l => l.payoff_date).map(l => ({...l, p, i})));
+  const P = pSum.properties, loans = P.flatMap((p, i) => p.current.filter(l => l.payoff_date).map(l => ({...l, p, i, end: l.pace_date || l.payoff_date})));
   // payoff timeline
   const svg = $("pTimeline"), W = svg.clientWidth || 800, rowH = 26, L = Math.min(190, W * 0.38), R = 12, T = 22, H = T + rowH * Math.max(1, loans.length) + 6;
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.style.height = H + "px";
@@ -1358,14 +1364,16 @@ function drawProps() {
     let g = ""; const step = (yEnd - y0) > 20 ? 5 : 2;
     for (let y = y0; y <= yEnd; y++) if ((y - y0) % step === 0) g += `<line x1="${X(y)}" x2="${X(y)}" y1="${T - 4}" y2="${H}" stroke="var(--grid)"/><text x="${X(y)}" y="12" text-anchor="middle">${y}</text>`;
     const nowX = X(y0 + now.getMonth() / 12);
-    loans.sort((a, b) => a.payoff_date.localeCompare(b.payoff_date)).forEach((l, k) => { const y = T + k * rowH, s = l.statement;
+    loans.sort((a, b) => a.end.localeCompare(b.end)).forEach((l, k) => { const y = T + k * rowH, s = l.statement;
+      if (l.pace_date) g += `<rect x="${nowX}" y="${y + 8}" width="${Math.max(2, X(yr(l.payoff_date)) - nowX)}" height="8" rx="3" fill="${pColor(l.i)}" opacity=".25"><title>Scheduled payments only: ${monthYear(l.payoff_date)}</title></rect>`;
       g += `<text class="nm" x="0" y="${y + 16}">${escapeHtml(l.p.name.length > 24 ? l.p.name.slice(0, 23) + "…" : l.p.name)}</text>`;
-      g += `<rect x="${nowX}" y="${y + 5}" width="${Math.max(2, X(yr(l.payoff_date)) - nowX)}" height="14" rx="4" fill="${pColor(l.i)}" opacity=".85"><title>${escapeHtml(l.p.name)}: ${usd(s.balance)} at ${fmt(s.rate, 3)}% · paid off ${monthYear(l.payoff_date)}</title></rect>`;
-      const tx = X(yr(l.payoff_date)) + 6, inside = tx > W - 70;
-      g += `<text x="${inside ? X(yr(l.payoff_date)) - 6 : tx}" y="${y + 16}" text-anchor="${inside ? "end" : "start"}" ${inside ? 'style="fill:var(--surface)"' : ""}>${monthYear(l.payoff_date)}</text>`;
+      g += `<rect x="${nowX}" y="${y + 5}" width="${Math.max(2, X(yr(l.end)) - nowX)}" height="14" rx="4" fill="${pColor(l.i)}" opacity=".85"><title>${escapeHtml(l.p.name)}: ${usd(s.balance)} at ${fmt(s.rate, 3)}% · paid off ${monthYear(l.end)}${l.pace_date ? ` at your pace (+${usd(l.extra)}/mo); scheduled ${monthYear(l.payoff_date)}` : ""}</title></rect>`;
+      const ex = l.pace_date ? X(yr(l.payoff_date)) : X(yr(l.end)), tx = ex + 6, inside = tx > W - 120;
+      const lab = monthYear(l.end) + (l.pace_date ? ` (at your pace; scheduled ${monthYear(l.payoff_date)})` : "");
+      g += `<text x="${inside ? X(yr(l.end)) - 6 : tx}" y="${y + 16}" text-anchor="${inside ? "end" : "start"}" ${inside ? 'style="fill:var(--surface)"' : ""}>${inside ? monthYear(l.end) : lab}</text>`;
       if (s.maturity) g += `<line x1="${X(yr(s.maturity))}" x2="${X(yr(s.maturity))}" y1="${y + 2}" y2="${y + 22}" stroke="var(--ink-2)" stroke-width="2"><title>Maturity ${monthYear(s.maturity)}</title></line>`; });
     svg.innerHTML = g;
-    $("pFree").textContent = `Mortgage-free ${monthYear(loans.map(l => l.payoff_date).sort().pop())}`;
+    $("pFree").textContent = `Mortgage-free ${monthYear(loans.map(l => l.end).sort().pop())}`;
   }
   // taxes / insurance by year, stacked by property
   const ys = [...new Set(pSum.taxins.map(t => t.year))].sort(), stacks = P.map((p, i) => ({k: String(p.id), l: shortName(p.name), c: pColor(i)}));

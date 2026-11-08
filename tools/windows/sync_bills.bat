@@ -18,6 +18,7 @@ robocopy "%P%\Dashboard" "%PD%" *.pdf /S %O% /LOG+:"%LOG%"
 rem statements already filed elsewhere in the Property folder
 robocopy "%P%\16609 Malaga Hills DR\Morgage" "%PD%\16609 Malaga Hills Dr\Mortgage" *.pdf /S %O% /LOG+:"%LOG%"
 robocopy "%P%\9111 United Kingdom\Morgtage" "%PD%\9111 United Kingdom Dr\Mortgage" *.pdf /S %O% /LOG+:"%LOG%"
+robocopy "%P%\2105 Oxford\Morgatage" "%PD%\2105 Oxford Blvd\Mortgage" *.pdf /S %O% /LOG+:"%LOG%"
 robocopy "%P%\16609 Malaga Hills DR\UWM\Statements" "%PD%\16609 Malaga Hills Dr\UWM" *.pdf %O% /LOG+:"%LOG%"
 robocopy "%P%\16609 Malaga Hills DR\HELOC - CACU" "%PD%\_Statements Sept 2026" "*Statment.pdf" "*Statement.pdf" %O% /LOG+:"%LOG%"
 robocopy "%P%\Refinance" "%PD%\_Statements Aug 2023" "*statment.pdf" "*statement.pdf" %O% /LOG+:"%LOG%"

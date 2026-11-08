@@ -352,6 +352,22 @@ def payoff(balance, rate, pi, extra=0.0):
     return n, round(tot, 2)
 
 
+def extra_pace(stmts):
+    """Extra principal actually being paid each month, from consecutive statements: the balance drop beyond the
+    scheduled principal. Median of the last 6 months; None when it's under $25 (paying as scheduled)."""
+    ss = [s for s in stmts if s["statement_date"] and s["balance"] is not None]
+    xs = []
+    for a, b in zip(ss, ss[1:]):
+        gap = (date.fromisoformat(b["statement_date"]) - date.fromisoformat(a["statement_date"])).days
+        if 20 <= gap <= 40 and a["principal"] is not None:
+            xs.append(a["balance"] - b["balance"] - a["principal"])
+    xs = xs[-6:]
+    if len(xs) < 3:
+        return None
+    med = sorted(xs)[len(xs) // 2]
+    return round(med, 2) if med >= 25 else None
+
+
 def add_months(d: date, n: int) -> date:
     y, m = divmod(d.month - 1 + n, 12)
     return date(d.year + y, m + 1, min(d.day, 28))
@@ -635,6 +651,14 @@ class Properties:
                                       payoff_date=add_months(start, n - 1).isoformat() if n else None))
             # most recent loan of a servicing transfer (UWM -> Rocket) is the active one
             active = [l for l in cur_loans if l["active"]] or sorted(cur_loans, key=lambda l: l["statement"]["statement_date"] or "")[-1:]
+            if len(active) == 1 and active[0]["pi"]:
+                l = active[0]
+                x = extra_pace(mine)
+                if x:
+                    n2, tot2 = payoff(l["statement"]["balance"], l["statement"]["rate"], l["pi"], x)
+                    if n2:
+                        start = date.fromisoformat(l["statement"]["due_date"]) if l["statement"]["due_date"] else today
+                        l.update(extra=x, pace_months=n2, pace_interest=tot2, pace_date=add_months(start, n2 - 1).isoformat())
             out.append(dict(p, loans=cur_loans, current=active,
                             balance=sum(l["statement"]["balance"] or 0 for l in active),
                             payment=sum(l["statement"]["payment"] or 0 for l in active),
