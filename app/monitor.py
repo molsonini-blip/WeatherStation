@@ -1135,6 +1135,14 @@ async def main():
         mon.latest = last[0]
 
     await mon.load_station()
+    if CFG.yolink_uaid and CFG.yolink_secret:
+        try:
+            d = await mon.yolink_plug()
+            st = (await mon.yolink_call({"method": f"{d['type']}.getState", "targetDevice": d["deviceId"],
+                                         "token": d["token"]})).get("state")
+            log.info("YoLink connected: car cover plug '%s' (%s) is currently %s", d["name"], d["type"], st)
+        except Exception as e:
+            log.warning("YoLink check failed: %s", e)
     await mon.backfill()
 
     runner = web.AppRunner(build_app(mon))
