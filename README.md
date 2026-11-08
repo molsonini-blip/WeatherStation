@@ -58,6 +58,8 @@ Each event sends `value1`, `value2` and `value3`, which you can use in notificat
 | `tempest_storm_start` | Storm begins | reasons / temp / wind |
 | `tempest_storm_end` | Storm over | duration / rain + max gust / strikes |
 | `tempest_all_clear` | Back to normal | – |
+| `tempest_hail_warning` | NWS warning/watch mentions hail (radar-indicated or forecast, usually minutes ahead) | size + name, e.g. "1.75 in hail possible (golf ball)" / alert + expiry / threat |
+| `tempest_hail` | Your Tempest detects hail hitting the sensor | what was detected / time / rain rate + gust |
 | `tempest_lightning_close` | Strike ≤ 8 mi | distance / time |
 | `tempest_high_wind` | Gust ≥ 40 mph | gust / direction / avg |
 | `tempest_heavy_rain` | Rate ≥ 1 in/hr | rate / today's total |
@@ -66,7 +68,9 @@ Each event sends `value1`, `value2` and `value3`, which you can use in notificat
 | `tempest_offline` | No data for 15 min | – |
 | `tempest_test` | "Send IFTTT test" button on the dashboard | – |
 
-Alerts that repeat (wind, rain, lightning) have a 30-minute cooldown.
+Alerts that repeat (wind, rain, lightning) have a 30-minute cooldown; station hail has a 15-minute cooldown (`HAIL_COOLDOWN_MIN`).
+NWS alerts are checked every 5 min normally and every 2 min during a storm watch. Set `ALERT_HAIL_MIN_IN=1.0` to only be told about quarter-size hail or bigger.
+The Tempest's hail detection comes from its haptic sensor, and very heavy rain can occasionally be mistaken for hail.
 
 Ideas: storm_start → close the garage and turn the porch lights on. lightning_close → turn off the
 outdoor smart plugs. storm_end → push a notification with the totals. high_wind → retract the awning.

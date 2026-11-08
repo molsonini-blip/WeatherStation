@@ -78,7 +78,9 @@ class Config:
     alert_cooldown_min: float = env("ALERT_COOLDOWN_MIN", 30, float)
     # polling
     normal_forecast_hours: float = env("NORMAL_FORECAST_HOURS", 3, float)
-    normal_nws_min: float = env("NORMAL_NWS_MIN", 15, float)
+    normal_nws_min: float = env("NORMAL_NWS_MIN", 5, float)
+    alert_hail_min_in: float = env("ALERT_HAIL_MIN_IN", 0.0, float)  # NWS hail size that triggers an alert
+    hail_cooldown_min: float = env("HAIL_COOLDOWN_MIN", 15, float)
     live_forecast_min: float = env("LIVE_FORECAST_MIN", 15, float)
     live_nws_min: float = env("LIVE_NWS_MIN", 2, float)
     daily_summary_time: str = env("DAILY_SUMMARY_TIME", "07:00")
@@ -92,7 +94,7 @@ REST = "https://swd.weatherflow.com/swd/rest"
 WS_URL = "wss://ws.weatherflow.com/swd/data"
 STATIC = Path(__file__).parent / "static"
 
-ALERT_LABELS = dict(watch_start="Storm watch", storm_start="Storm started", storm_end="Storm ended",
+ALERT_LABELS = dict(hail="Hail at station", hail_warning="Hail warning", watch_start="Storm watch", storm_start="Storm started", storm_end="Storm ended",
                     all_clear="All clear", lightning_close="Close lightning", high_wind="High wind",
                     heavy_rain="Heavy rain", nws_alert="NWS", daily="Daily summary", offline="Station offline",
                     test="Test")
@@ -130,6 +132,33 @@ def cardinal(deg):
         return ""
     return ["N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W",
             "WNW", "NW", "NNW"][int((deg % 360) / 22.5 + 0.5) % 16]
+
+
+def hail_size(props):
+    """Hail size in inches from an NWS alert: the maxHailSize parameter, or the text of a watch."""
+    import re
+    v = ((props.get("parameters") or {}).get("maxHailSize") or [None])[0]
+    try:
+        if v is not None and float(v) > 0:
+            return float(v)
+    except ValueError:
+        pass
+    text = f"{props.get('headline') or ''} {props.get('description') or ''}".lower()
+    if "hail" not in text:
+        return None
+    m = re.search(r"hail[^.]{0,60}?(\d+(?:\.\d+)?)\s*inch", text) or re.search(r"(\d+(?:\.\d+)?)\s*inch[^.]{0,30}hail", text)
+    return float(m.group(1)) if m else 0.0
+
+
+def hail_name(inches):
+    if not inches:
+        return "size not given"
+    for size, name in ((4.5, "softball"), (2.75, "baseball"), (2.5, "tennis ball"), (1.75, "golf ball"),
+                       (1.5, "ping pong ball"), (1.25, "half dollar"), (1.0, "quarter"), (0.88, "nickel"),
+                       (0.75, "penny")):
+        if inches >= size:
+            return name
+    return "pea"
 
 
 # ----------------------------------------------------------------------------- storage
@@ -236,9 +265,26 @@ class Monitor:
         if g >= CFG.alert_gust_mph:
             self.alert("high_wind", f"Gust {g:.0f} mph", f"{cardinal(row['wind_dir'])}",
                        f"avg {ms_to_mph(row['wind_avg']):.0f} mph")
+        if row["precip_type"] in (2, 3):
+            self.on_station_hail(row)
         rate = self.rain_rate_inhr()
         if rate >= CFG.alert_rain_inhr:
             self.alert("heavy_rain", f"{rate:.2f} in/hr", f"{self.rain_today_in():.2f} in today", "")
+
+    def on_station_hail(self, row):
+        """Tempest's haptic sensor classified the last minute's precipitation as hail."""
+        now = time.time()
+        if now - self.cooldowns.get("hail", 0) < CFG.hail_cooldown_min * 60:
+            return
+        self.cooldowns["hail"] = now
+        kind = "Hail with rain" if row["precip_type"] == 3 else "Hail"
+        when = datetime.fromtimestamp(row["ts"], ZoneInfo(CFG.tz)).strftime("%-I:%M %p")
+        self.log_event("alert:hail", f"Hail at station: {kind} detected · {when}")
+        asyncio.get_event_loop().create_task(self.send_ifttt(
+            "hail", f"{kind} detected at {self.station.get('name') or 'your station'}", when,
+            f"rain {self.rain_rate_inhr():.2f} in/hr, gust {ms_to_mph(row['wind_gust']) or 0:.0f} mph"))
+        self.push("hail", dict(ts=row["ts"], kind=kind))
+        asyncio.get_event_loop().call_soon(self.evaluate)
 
     def ingest_rapid(self, ob, source):
         ts, spd, d = int(ob[0]), ob[1], ob[2]
@@ -349,6 +395,8 @@ class Monitor:
         rained = self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND rain_mm>0", (self.since(sl),))[0]["n"]
         if rained or now - self.last_precip_evt < sl:
             storm.append("rain falling")
+        if self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND precip_type IN (2,3)", (self.since(sl),))[0]["n"]:
+            storm.insert(0, "hail detected")
         d15, n15 = self.nearest_strike_mi(sl)
         if d15 is not None and d15 <= CFG.storm_lightning_mi:
             storm.append(f"lightning {d15:.0f} mi")
@@ -487,7 +535,7 @@ class Monitor:
             rain_today_in=self.rain_today_in(), rain_rate_inhr=self.rain_rate_inhr(),
             strikes_1h=n1h, nearest_strike_1h_mi=d1h,
             last_strike=dict(ts=last[0]["ts"], mi=km_to_mi(last[0]["dist_km"])) if last else None,
-            battery=o.get("battery"), rapid=self.rapid,
+            battery=o.get("battery"), rapid=self.rapid, precip_type=o.get("precip_type"),
             last_packet=self.last_packet or None, ifttt=bool(CFG.ifttt_key),
         )
 
@@ -579,12 +627,23 @@ class Monitor:
                 data = await r.json(content_type=None)
             alerts = [dict(id=f["properties"]["id"], event=f["properties"]["event"],
                            headline=f["properties"].get("headline"), severity=f["properties"].get("severity"),
-                           expires=f["properties"].get("expires"))
+                           expires=f["properties"].get("expires"), hail_in=hail_size(f["properties"]),
+                           hail_threat=((f["properties"].get("parameters") or {}).get("hailThreat") or [None])[0])
                       for f in data.get("features", [])]
             seen = set(self.db.kv_get("nws_seen", []))
             for a in alerts:
                 if a["id"] not in seen:
                     self.alert("nws_alert", a["event"], a["headline"] or "", a["severity"] or "", cooldown=False)
+                    if a["hail_in"] is not None and a["hail_in"] >= CFG.alert_hail_min_in:
+                        exp = ""
+                        try:
+                            exp = "until " + datetime.fromisoformat(a["expires"]).astimezone(ZoneInfo(CFG.tz)).strftime("%-I:%M %p")
+                        except Exception:
+                            pass
+                        size = f"{a['hail_in']:.2f} in hail" if a["hail_in"] else "Hail"
+                        self.alert("hail_warning", f"{size} possible ({hail_name(a['hail_in'])})",
+                                   f"{a['event']} {exp}".strip(),
+                                   (a["hail_threat"] or "").title(), cooldown=False)
                     seen.add(a["id"])
             self.db.kv_set("nws_seen", list(seen)[-200:])
             self.nws = alerts

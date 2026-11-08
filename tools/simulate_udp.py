@@ -22,7 +22,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--host", default="255.255.255.255")
     ap.add_argument("--port", type=int, default=50222)
-    ap.add_argument("--scenario", default="storm", choices=["calm", "storm"])
+    ap.add_argument("--scenario", default="storm", choices=["calm", "storm", "hail"])
     ap.add_argument("--speed", type=float, default=20)
     a = ap.parse_args()
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -31,7 +31,8 @@ def main():
     minute = 60 / a.speed
 
     # (minutes, phase)
-    plan = [(4, "calm")] if a.scenario == "calm" else [(3, "calm"), (3, "distant"), (6, "storm"), (8, "clear")]
+    plan = {"calm": [(4, "calm")], "hail": [(2, "calm"), (3, "hail"), (2, "clear")]}.get(
+        a.scenario, [(3, "calm"), (3, "distant"), (6, "storm"), (8, "clear")])
     temp, pres = 21.0, 1003.0
     for mins, phase in plan:
         print(f"--- {phase} ({mins} simulated min)")
@@ -48,11 +49,16 @@ def main():
                 pres += 0.3
                 if random.random() < .7:
                     send({"serial_number": SERIAL, "type": "evt_strike", "hub_sn": "HB-SIM", "evt": [int(now), random.randint(4, 12), 9000]})
+            elif phase == "hail":
+                avg, gust, rain = 8.0, 15.0, 1.2
             else:
                 avg, gust, rain = 2.0, 4.0, 0
             if phase == "storm" and _ == 0:
                 send({"serial_number": SERIAL, "type": "evt_precip", "hub_sn": "HB-SIM", "evt": [int(now)]})
-            send(obs(now, round(temp, 1), 80 if rain else 65, round(pres, 1), avg * .5, avg, gust, 160, rain))
+            m = obs(now, round(temp, 1), 80 if rain else 65, round(pres, 1), avg * .5, avg, gust, 160, rain)
+            if phase == "hail":
+                m["obs"][0][13] = 3  # rain + hail
+            send(m)
             # rapid wind every "3 s"
             steps = max(1, int(minute / 0.5))
             for _i in range(steps):

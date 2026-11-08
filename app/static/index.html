@@ -312,7 +312,7 @@ function renderState(s) {
   $("windD").textContent = `Gust ${fmt(s.wind_gust_mph)} · lull ${fmt(s.wind_lull_mph)} mph`;
   if (s.wind_dir != null) $("arrow").setAttribute("transform", `rotate(${(s.wind_dir + 180) % 360})`);
   $("rain").innerHTML = `${fmt(s.rain_today_in, 2)}<small>in</small>`;
-  $("rainD").textContent = s.rain_rate_inhr > 0 ? `Falling at ${fmt(s.rain_rate_inhr, 2)} in/hr` : "Not raining";
+  $("rainD").textContent = (s.precip_type === 2 || s.precip_type === 3 ? "⚠ Hail detected · " : "") + (s.rain_rate_inhr > 0 ? `Falling at ${fmt(s.rain_rate_inhr, 2)} in/hr` : "Not raining");
   $("pres").innerHTML = `${fmt(s.pressure_inhg, 2)}<small>inHg</small>`;
   const dp = s.pressure_trend_mb3h; $("presD").textContent = dp == null ? "Trend: collecting…" : `${dp <= -1 ? "Falling" : dp >= 1 ? "Rising" : "Steady"} (${dp > 0 ? "+" : ""}${fmt(dp, 1)} mb / 3 h)`;
   $("ltg").innerHTML = s.strikes_1h ? `${s.strikes_1h}<small>in last hour</small>` : `0<small>in last hour</small>`;
@@ -380,7 +380,7 @@ function renderForecast(f) {
 }
 function renderNws(a) {
   $("nwsN").innerHTML = a.length ? `${a.length}<small>active</small>` : `0<small>active</small>`;
-  $("nwsD").textContent = a.length ? a.map(x => x.event).join(", ") : "No NWS watches or warnings";
+  $("nwsD").textContent = a.length ? a.map(x => x.event + (x.hail_in ? ` (hail ${fmt(x.hail_in, 2)} in)` : x.hail_in === 0 ? " (hail)" : "")).join(", ") : "No NWS watches or warnings";
 }
 function freshness() {
   const s = state, src = {udp: "local network", ws: "Tempest cloud", rest: "Tempest cloud"}[s.source] || "waiting for data";
@@ -406,6 +406,7 @@ function connect() {
   es.addEventListener("strike", e => { strikes.push(JSON.parse(e.data)); drawAll(); });
   es.addEventListener("mode", e => { renderState(JSON.parse(e.data)); loadHistory(); loadLists(); });
   es.addEventListener("event", () => loadLists());
+  es.addEventListener("hail", () => { $("rainD").textContent = "⚠ Hail detected"; loadLists(); });
   es.addEventListener("forecast", e => renderForecast(JSON.parse(e.data)));
   es.addEventListener("nws", e => renderNws(JSON.parse(e.data)));
   es.onerror = () => { $("fresh").textContent = "Connection lost, retrying…"; };
