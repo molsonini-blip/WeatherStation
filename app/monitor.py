@@ -96,6 +96,11 @@ class Config:
     yolink_device: str | None = env("YOLINK_DEVICE")  # plug name as shown in the YoLink app, or its deviceId
     yolink_host: str = env("YOLINK_HOST", "https://api.yosmart.com")
     yolink_poll_min: float = env("YOLINK_POLL_MIN", 5, float)  # temperature/humidity sensor polling
+    # long-term history
+    history_backfill: bool = env("HISTORY_BACKFILL", "true").lower() in ("1", "true", "yes")  # download full Tempest history
+    history_backfill_delay_s: float = env("HISTORY_BACKFILL_DELAY_S", 2, float)
+    backup_keep_days: int = env("BACKUP_KEEP_DAYS", 14, int)
+    backup_keep_months: int = env("BACKUP_KEEP_MONTHS", 24, int)
     # hail camera (Reolink + printed size markers on a dark plate)
     hailcam_host: str | None = env("HAILCAM_HOST")
     hailcam_user: str = env("HAILCAM_USER", "admin")
@@ -119,7 +124,7 @@ class Config:
 
 
 CFG = Config()
-REST = "https://swd.weatherflow.com/swd/rest"
+REST = os.environ.get("TEMPEST_REST", "https://swd.weatherflow.com/swd/rest")
 WS_URL = "wss://ws.weatherflow.com/swd/data"
 STATIC = Path(__file__).parent / "static"
 
@@ -206,6 +211,9 @@ CREATE TABLE IF NOT EXISTS storms (id INTEGER PRIMARY KEY AUTOINCREMENT, start_t
 CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT);
 CREATE TABLE IF NOT EXISTS hail_frames (ts INTEGER PRIMARY KEY, visible INTEGER, new INTEGER, max_mm REAL,
   sizes TEXT, image TEXT);
+CREATE TABLE IF NOT EXISTS daily (day TEXT, source TEXT, n INTEGER, t_lo REAL, t_hi REAL, t_avg REAL,
+  h_lo REAL, h_hi REAL, h_avg REAL, rain_in REAL, gust_mph REAL, wind_mph REAL, p_avg REAL, uv_max REAL,
+  strikes INTEGER, hail_min INTEGER, PRIMARY KEY (day, source));
 CREATE TABLE IF NOT EXISTS yl_th (ts INTEGER, device TEXT, temp_c REAL, humidity REAL, battery INTEGER,
   PRIMARY KEY (device, ts));
 CREATE TABLE IF NOT EXISTS hail_events (id INTEGER PRIMARY KEY AUTOINCREMENT, start_ts INTEGER, end_ts INTEGER,
@@ -752,6 +760,7 @@ class Monitor:
             self.station = st
             CFG.station_id = st["station_id"]
             self.elevation = (st.get("station_meta") or {}).get("elevation") or 0
+            self.station_created = st.get("created_epoch")
             CFG.lat = CFG.lat or st.get("latitude")
             CFG.lon = CFG.lon or st.get("longitude")
             for d in st.get("devices", []):
@@ -1113,6 +1122,113 @@ class Monitor:
             except asyncio.TimeoutError:
                 pass
 
+    # --------------------------------------------------------------- long-term history
+    def day_bounds(self, day):
+        """(start_ts, end_ts) of a local calendar day 'YYYY-MM-DD'."""
+        tz = ZoneInfo(CFG.tz)
+        d = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=tz)
+        return int(d.timestamp()), int((d + timedelta(days=1)).replace(tzinfo=tz).timestamp())
+
+    def rollup_day(self, day):
+        """Summarise one local day for the outdoor station and every YoLink sensor into the daily table."""
+        s, e = self.day_bounds(day)
+        o = self.db.q("""SELECT COUNT(*) n, MIN(temp_c) tl, MAX(temp_c) th, AVG(temp_c) ta, MIN(rh) hl, MAX(rh) hh, AVG(rh) ha,
+                         SUM(rain_mm) r, MAX(wind_gust) g, AVG(wind_avg) w, AVG(pressure_mb) p, MAX(uv) uv,
+                         SUM(CASE WHEN precip_type IN (2,3) THEN 1 ELSE 0 END) hail FROM obs WHERE ts>=? AND ts<?""", (s, e))[0]
+        if o["n"]:
+            st = self.db.q("SELECT COUNT(*) n FROM strikes WHERE ts>=? AND ts<?", (s, e))[0]["n"]
+            p = sea_level_mb(o["p"], self.elevation, o["ta"])
+            self.db.x("INSERT OR REPLACE INTO daily VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+                day, "out", o["n"], c_to_f(o["tl"]), c_to_f(o["th"]), c_to_f(o["ta"]), o["hl"], o["hh"], o["ha"],
+                mm_to_in(o["r"] or 0), ms_to_mph(o["g"]), ms_to_mph(o["w"]), mb_to_inhg(p), o["uv"], st, o["hail"]))
+        for r in self.db.q("""SELECT device, COUNT(*) n, MIN(temp_c) tl, MAX(temp_c) th, AVG(temp_c) ta, MIN(humidity) hl,
+                              MAX(humidity) hh, AVG(humidity) ha FROM yl_th WHERE ts>=? AND ts<? GROUP BY device""", (s, e)):
+            self.db.x("INSERT OR REPLACE INTO daily VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", (
+                day, r["device"], r["n"], c_to_f(r["tl"]), c_to_f(r["th"]), c_to_f(r["ta"]), r["hl"], r["hh"], r["ha"],
+                None, None, None, None, None, None, None))
+
+    def rollup_missing(self, recent_days=2):
+        """Fill the daily table for every day that has raw data but no summary yet (and redo the last few days)."""
+        first = min([x for x in (self.db.q("SELECT MIN(ts) t FROM obs")[0]["t"],
+                                 self.db.q("SELECT MIN(ts) t FROM yl_th")[0]["t"]) if x] or [time.time()])
+        tz = ZoneInfo(CFG.tz)
+        d = datetime.fromtimestamp(first, tz).date()
+        today = datetime.now(tz).date()
+        have = {r["day"] for r in self.db.q("SELECT DISTINCT day FROM daily")}
+        n = 0
+        while d <= today:
+            key = d.isoformat()
+            if key not in have or (today - d).days <= recent_days:
+                self.rollup_day(key)
+                n += 1
+            d += timedelta(days=1)
+        return n
+
+    async def history_backfill_loop(self):
+        """Download the station's full 1-minute history from Tempest, one day per request, oldest gaps first."""
+        if not (CFG.history_backfill and CFG.token):
+            return
+        await asyncio.sleep(60)
+        while not self.device_id:
+            await asyncio.sleep(60)
+        tz = ZoneInfo(CFG.tz)
+        state = self.db.kv_get("backfill", {}) or {}
+        if state.get("done"):
+            return
+        created = getattr(self, "station_created", None)
+        day = datetime.fromisoformat(state["next"]).date() if state.get("next") else \
+            datetime.now(tz).date() - timedelta(days=1)
+        empty_run = 0
+        log.info("history backfill: downloading Tempest history backwards from %s", day)
+        while True:
+            s, e = self.day_bounds(day.isoformat())
+            if created and e < created:
+                break
+            have = self.db.q("SELECT COUNT(*) n FROM obs WHERE ts>=? AND ts<?", (s, e))[0]["n"]
+            if have < 1300:  # a full day is 1440 one-minute observations
+                try:
+                    data = await self.rest(f"/observations/device/{self.device_id}", time_start=s, time_end=e - 1)
+                    rows = data.get("obs") or []
+                    for o in rows:
+                        self.ingest_obs(o, "rest")
+                    empty_run = 0 if rows else empty_run + 1
+                except Exception as ex:
+                    log.warning("history backfill %s: %s", day, ex)
+                    await asyncio.sleep(60)
+                    continue
+                self.rollup_day(day.isoformat())
+                await asyncio.sleep(CFG.history_backfill_delay_s)
+            else:
+                empty_run = 0
+            if not created and empty_run >= 45:  # 45 days with nothing = before the station existed
+                break
+            day -= timedelta(days=1)
+            self.db.kv_set("backfill", dict(next=day.isoformat(), done=False))
+            await asyncio.sleep(0)
+        self.db.kv_set("backfill", dict(next=day.isoformat(), done=True))
+        self.log_event("history", f"Tempest history download complete (back to {day + timedelta(days=1)})")
+        log.info("history backfill complete")
+
+    def backup_db(self):
+        """Nightly copy of the database: last BACKUP_KEEP_DAYS days plus one per month."""
+        bdir = Path(CFG.db_path).parent / "backups"
+        bdir.mkdir(exist_ok=True)
+        today = datetime.now(ZoneInfo(CFG.tz)).date()
+        dst = bdir / f"tempest-{today}.db"
+        out = sqlite3.connect(dst)
+        with out:
+            self.db.c.backup(out)
+        out.close()
+        files = sorted(bdir.glob("tempest-*.db"))
+        monthly = {}
+        for f in files:
+            monthly.setdefault(f.stem[8:15], f)  # first backup of each month
+        keep = set(files[-CFG.backup_keep_days:]) | set(list(monthly.values())[-CFG.backup_keep_months:])
+        for f in files:
+            if f not in keep:
+                f.unlink()
+        log.info("database backed up to %s", dst)
+
     async def daily_loop(self):
         hh, mm = map(int, CFG.daily_summary_time.split(":"))
         while True:
@@ -1122,6 +1238,11 @@ class Monitor:
                 nxt += timedelta(days=1)
             await asyncio.sleep((nxt - now).total_seconds())
             await self.send_daily()
+            try:
+                self.rollup_missing()
+                await asyncio.get_running_loop().run_in_executor(None, self.backup_db)
+            except Exception as e:
+                log.warning("nightly history/backup: %s", e)
             cutoff = self.since(CFG.rapid_keep_hours * 3600)
             # keep 3-second wind for storms forever, prune the rest
             self.db.x("DELETE FROM rapid WHERE ts<? AND NOT EXISTS (SELECT 1 FROM storms s WHERE rapid.ts "
@@ -1367,6 +1488,73 @@ def build_app(mon: Monitor):
     r.add_get("/api/yolink/sensors", yl_sensors)
     r.add_get("/api/yolink/history", yl_history)
     r.add_post("/api/yolink/refresh", yl_refresh)
+
+    # ---------------- long-term history
+    METRICS = {"temp": ("°F", "t"), "humidity": ("%", "h"), "rain": ("in", "rain_in"), "wind": ("mph", "gust_mph"),
+               "pressure": ("inHg", "p_avg")}
+
+    async def hist_sources(_):
+        names = {d["deviceId"]: d["name"] for d in (mon.db.kv_get("yl_devices", []) or [])}
+        out = []
+        for r in mon.db.q("SELECT source, MIN(day) first, MAX(day) last, COUNT(*) days FROM daily GROUP BY source"):
+            src = r["source"]
+            out.append(dict(id=src, name="Outdoor (Tempest)" if src == "out" else names.get(src, src),
+                            first=r["first"], last=r["last"], days=r["days"],
+                            metrics=list(METRICS) if src == "out" else ["temp", "humidity"]))
+        out.sort(key=lambda x: (x["id"] != "out", x["name"].lower()))
+        return web.json_response(dict(sources=out, backfill=mon.db.kv_get("backfill", {})))
+
+    async def hist_yoy(req):
+        src, metric = req.query.get("source", "out"), req.query.get("metric", "temp")
+        if metric not in METRICS:
+            raise web.HTTPBadRequest()
+        unit, col = METRICS[metric]
+        mon.rollup_day(datetime.now(ZoneInfo(CFG.tz)).date().isoformat())
+        cols = {"t": "t_lo lo, t_hi hi, t_avg avg", "h": "h_lo lo, h_hi hi, h_avg avg"}.get(col, f"{col} v")
+        rows = mon.db.q(f"SELECT day, {cols} FROM daily WHERE source=? ORDER BY day", (src,))
+        years = {}
+        for r in rows:
+            y, md = r["day"][:4], r["day"][5:]
+            r = dict(r, md=md)
+            r.pop("day")
+            years.setdefault(y, []).append(r)
+        return web.json_response(dict(unit=unit, metric=metric, years=years))
+
+    async def hist_summary(req):
+        src = req.query.get("source", "out")
+        mon.rollup_day(datetime.now(ZoneInfo(CFG.tz)).date().isoformat())
+        yearly = mon.db.q("""SELECT substr(day,1,4) year, COUNT(*) days, MIN(t_lo) t_lo, MAX(t_hi) t_hi, AVG(t_avg) t_avg,
+              AVG(h_avg) h_avg, SUM(rain_in) rain, MAX(gust_mph) gust, SUM(strikes) strikes,
+              SUM(CASE WHEN rain_in>=0.01 THEN 1 ELSE 0 END) rain_days, SUM(CASE WHEN hail_min>0 THEN 1 ELSE 0 END) hail_days,
+              SUM(CASE WHEN t_hi>=100 THEN 1 ELSE 0 END) days_100, SUM(CASE WHEN t_lo<=32 THEN 1 ELSE 0 END) freeze_days
+              FROM daily WHERE source=? GROUP BY year ORDER BY year""", (src,))
+        monthly = mon.db.q("""SELECT substr(day,1,4) year, substr(day,6,2) month, AVG(t_avg) t_avg, MAX(t_hi) t_hi, MIN(t_lo) t_lo,
+              AVG(h_avg) h_avg, SUM(rain_in) rain, COUNT(*) days FROM daily WHERE source=? GROUP BY year, month""", (src,))
+        hot = mon.db.q("SELECT day, t_hi FROM daily WHERE source=? AND t_hi IS NOT NULL ORDER BY t_hi DESC LIMIT 1", (src,))
+        cold = mon.db.q("SELECT day, t_lo FROM daily WHERE source=? AND t_lo IS NOT NULL ORDER BY t_lo LIMIT 1", (src,))
+        wet = mon.db.q("SELECT day, rain_in FROM daily WHERE source=? AND rain_in>0 ORDER BY rain_in DESC LIMIT 1", (src,))
+        windy = mon.db.q("SELECT day, gust_mph FROM daily WHERE source=? AND gust_mph IS NOT NULL ORDER BY gust_mph DESC LIMIT 1", (src,))
+        return web.json_response(dict(yearly=yearly, monthly=monthly, records=dict(
+            hottest=hot[0] if hot else None, coldest=cold[0] if cold else None,
+            wettest=wet[0] if wet else None, windiest=windy[0] if windy else None)))
+
+    async def hist_export(req):
+        """CSV of the daily table, for Excel."""
+        src = req.query.get("source")
+        rows = mon.db.q("SELECT * FROM daily WHERE (? IS NULL OR source=?) ORDER BY source, day", (src, src))
+        import csv, io
+        buf = io.StringIO()
+        if rows:
+            w = csv.DictWriter(buf, fieldnames=list(rows[0]))
+            w.writeheader()
+            w.writerows(rows)
+        return web.Response(text=buf.getvalue(), content_type="text/csv",
+                            headers={"Content-Disposition": f'attachment; filename="daily-{src or "all"}.csv"'})
+
+    r.add_get("/api/history/sources", hist_sources)
+    r.add_get("/api/history/yoy", hist_yoy)
+    r.add_get("/api/history/summary", hist_summary)
+    r.add_get("/api/history/export.csv", hist_export)
     r.add_get("/api/hailcam/image", hailcam_image)
     r.add_post("/api/hailcam/test", hailcam_test)
     r.add_static("/static", STATIC)
@@ -1408,9 +1596,11 @@ async def main():
     await runner.setup()
     await web.TCPSite(runner, "0.0.0.0", CFG.http_port).start()
     log.info("dashboard on http://0.0.0.0:%d", CFG.http_port)
+    n = mon.rollup_missing()
+    log.info("daily history: %d days summarised", n)
     mon.hailcam_setup()
     await asyncio.gather(mon.udp_loop(), mon.ws_loop(), mon.scheduler(), mon.daily_loop(), mon.hailcam_loop(),
-                         mon.yolink_th_loop())
+                         mon.yolink_th_loop(), mon.history_backfill_loop())
 
 
 if __name__ == "__main__":

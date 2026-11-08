@@ -132,6 +132,13 @@ main[hidden]{display:none}
 .pill{display:inline-flex;align-items:center;gap:4px;font-size:11.5px;font-weight:600;padding:1px 7px;border-radius:999px;box-shadow:inset 0 0 0 1px var(--ring)}
 .pill.warn::before{content:"▲";color:var(--warning)}.pill.crit::before{content:"●";color:var(--critical)}
 .notice{grid-column:span 12;color:var(--ink-2)}
+.hctl{grid-column:span 12;display:flex;flex-wrap:wrap;gap:8px 12px;align-items:center}
+.hctl select{font:inherit;color:var(--ink);background:var(--surface);border:0;box-shadow:inset 0 0 0 1px var(--ring);border-radius:8px;padding:6px 10px}
+.hctl .seg{flex-wrap:wrap}
+.hctl a{color:var(--s1);font-weight:600;text-decoration:none;font-size:13px}
+.recs{grid-column:span 12;display:grid;gap:12px;grid-template-columns:repeat(auto-fill,minmax(200px,1fr))}
+.recs .card .v{font-size:24px;font-weight:500}.recs .card .d{font-size:12.5px;color:var(--ink-2)}
+td.hl{font-weight:650}
 .live-only{display:none}body.live .live-only{display:block}
 @media (max-width:900px){.hero,.tiles,.chart,.half{grid-column:span 12}.tiles{grid-template-columns:repeat(2,1fr)}.fc{grid-template-columns:repeat(4,minmax(0,1fr))}}
 @media (max-width:520px){.big{font-size:52px}.tiles{grid-template-columns:1fr 1fr}.fc{grid-template-columns:repeat(3,minmax(0,1fr))}}
@@ -144,7 +151,7 @@ main[hidden]{display:none}
       <h1 id="station">Tempest Monitor</h1>
       <div class="sub" id="fresh">Connecting…</div>
     </div>
-    <nav class="tabs" aria-label="Pages"><a href="#weather" data-pg="weather">Weather</a><a href="#yolink" data-pg="yolink">YoLink</a></nav>
+    <nav class="tabs" aria-label="Pages"><a href="#weather" data-pg="weather">Weather</a><a href="#yolink" data-pg="yolink">YoLink</a><a href="#history" data-pg="history">History</a></nav>
     <div class="spacer"></div>
     <span class="badge" id="badge" role="status"><span class="dot"></span><span id="modeLabel">Normal</span></span>
     <div class="seg" id="range" aria-label="History range">
@@ -235,6 +242,19 @@ main[hidden]{display:none}
       <div class="ylcards" id="ylCards"></div>
       <section class="card" style="grid-column:span 12"><div style="display:flex;align-items:center;gap:8px;margin-bottom:8px"><h2 style="margin:0">Sensors</h2><span style="flex:1"></span><button id="ylRefresh">Find new sensors</button></div>
         <div style="overflow:auto"><table id="ylTable"></table></div></section>
+    </div>
+  </main>
+
+  <main id="pgHistory" hidden>
+    <div class="grid">
+      <div class="hctl"><label for="hSrc" class="sub">Sensor</label><select id="hSrc"></select>
+        <div class="seg" id="hMetric"></div><span style="flex:1"></span><a id="hCsv" href="/api/history/export.csv">Download CSV</a></div>
+      <div class="notice card" id="hNote" style="display:none"></div>
+      <div class="recs" id="hRecs"></div>
+      <section class="card chart wide"><div class="head"><h2 id="hTitle">Year over year</h2><span class="legend" id="hLeg"></span></div>
+        <svg class="viz" id="hChart" style="height:300px"></svg><div class="sub" id="hHint" style="margin-top:6px"></div></section>
+      <section class="card" style="grid-column:span 12"><h2>By year</h2><div style="overflow:auto"><table id="hYears"></table></div></section>
+      <section class="card" style="grid-column:span 12"><h2 id="hMonTitle">By month</h2><div style="overflow:auto"><table id="hMonths"></table></div></section>
     </div>
   </main>
 </div>
@@ -570,7 +590,7 @@ $("range").onclick = e => { const b = e.target.closest("button"); if (!b) return
   hours = +b.dataset.h; $("range").querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b)); loadHistory(); if (page === "yolink") loadYolink(); };
 $("testBtn").onclick = async () => { const r = await fetch("/api/test-ifttt", {method: "POST"}).then(r => r.json()).catch(() => ({ok: false}));
   $("testMsg").textContent = r.ok ? `Sent “${r.event}”` : (r.error || "Failed"); };
-addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTimeout(() => { drawAll(); if (page === "yolink") drawYolink(); }, 150); });
+addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTimeout(() => { drawAll(); if (page === "yolink") drawYolink(); if (page === "history") drawYoy(); }, 150); });
 
 /* refresh cadence follows the mode: every 5 min when calm, every 30 s when live */
 (async function tick() {
@@ -580,12 +600,12 @@ addEventListener("resize", () => { clearTimeout(window._rt); window._rt = setTim
 /* ---------- pages: Weather / YoLink ---------- */
 let page = "weather", ylSnap = null;
 function showPage() {
-  page = location.hash === "#yolink" ? "yolink" : "weather";
-  $("pgWeather").hidden = page !== "weather"; $("pgYolink").hidden = page !== "yolink";
+  page = {"#yolink": "yolink", "#history": "history"}[location.hash] || "weather";
+  $("pgWeather").hidden = page !== "weather"; $("pgYolink").hidden = page !== "yolink"; $("pgHistory").hidden = page !== "history";
   document.querySelectorAll(".tabs a").forEach(a => a.dataset.pg === page ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"));
   $("badge").style.display = page === "weather" ? "" : "none";
   $("range").style.display = page === "weather" ? "" : "none";
-  if (page === "yolink") loadYolink(); else drawAll();
+  if (page === "yolink") loadYolink(); else if (page === "history") loadHistoryPage(); else drawAll();
 }
 addEventListener("hashchange", showPage);
 
@@ -597,6 +617,7 @@ function mchart(svg, list, opt = {}) {
   if (!all.length) { svg.innerHTML = `<text x="${W/2}" y="${H/2}" text-anchor="middle">No data yet</text>`; return; }
   const x0 = opt.x0, x1 = opt.x1; let lo = Math.min(...all), hi = Math.max(...all);
   if (hi - lo < (opt.span || 5)) { const m = (hi + lo) / 2; lo = m - (opt.span || 5) / 2; hi = m + (opt.span || 5) / 2; }
+  if (opt.zero) lo = 0;
   const raw = (hi - lo) / 4, mag = 10 ** Math.floor(Math.log10(raw)), step = [1, 2, 2.5, 5, 10].map(k => k * mag).find(k => k >= raw);
   lo = Math.floor(lo / step) * step; hi = Math.ceil(hi / step) * step;
   const X = t => L + (t - x0) / Math.max(1, x1 - x0) * (W - L - R), Y = v => T + (1 - (v - lo) / (hi - lo)) * (H - T - B);
@@ -604,8 +625,9 @@ function mchart(svg, list, opt = {}) {
   for (let v = lo; v <= hi + step / 2; v += step) { const y = Y(v);
     g += `<line x1="${L}" x2="${W - R}" y1="${y}" y2="${y}" stroke="var(--grid)"/><text x="${L - 6}" y="${y + 4}" text-anchor="end">${fmt(v, step < 1 ? 1 : 0)}</text>`; }
   const span = x1 - x0, nx = Math.max(2, Math.floor((W - L) / 110));
-  for (let i = 0; i <= nx; i++) { const t = x0 + span * i / nx;
-    const lab = span > 2 * 86400 ? new Date(t * 1000).toLocaleDateString([], {weekday: "short", hour: "numeric"}) : new Date(t * 1000).toLocaleTimeString([], {hour: "numeric"});
+  if (opt.xticks) opt.xticks.forEach(k => g += `<text x="${X(k.t)}" y="${H - 6}" text-anchor="middle">${k.l}</text>`);
+  else for (let i = 0; i <= nx; i++) { const t = x0 + span * i / nx;
+    const lab = span > 20 * 86400 ? new Date(t * 1000).toLocaleDateString([], {month: "short", day: "numeric"}) : span > 2 * 86400 ? new Date(t * 1000).toLocaleDateString([], {weekday: "short", hour: "numeric"}) : new Date(t * 1000).toLocaleTimeString([], {hour: "numeric"});
     g += `<text x="${X(t)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === nx ? "end" : "middle"}">${lab}</text>`; }
   g += `<line x1="${L}" x2="${W - R}" y1="${H - B}" y2="${H - B}" stroke="var(--axis)"/>`;
   list.forEach(s => { let d = "", prev = null;
@@ -626,7 +648,7 @@ function mchart(svg, list, opt = {}) {
       if (!best || Math.abs(best.ts - t) > (opt.gap || 3 * 3600)) { c.style.display = "none"; return; }
       c.setAttribute("cx", X(best.ts)); c.setAttribute("cy", Y(best.v)); c.style.display = "";
       lines.push(`<span style="color:${s.c}">■</span> ${escapeHtml(s.l)}: <b>${fmt(best.v, opt.dec ?? 1)}${opt.u}</b>`); });
-    tip.innerHTML = `${dtstr(t)}<br>` + lines.join("<br>");
+    tip.innerHTML = `${opt.tlabel ? opt.tlabel(t) : dtstr(t)}<br>` + lines.join("<br>");
     tip.style.display = "block"; tip.style.left = Math.min(e.clientX + 12, innerWidth - tip.offsetWidth - 8) + "px"; tip.style.top = (e.clientY - 12 - tip.offsetHeight) + "px";
   };
   svg.onmouseleave = () => { xh.style.display = "none"; svg.querySelectorAll(".hp").forEach(c => c.style.display = "none"); tip.style.display = "none"; };
@@ -652,7 +674,7 @@ function renderYolinkCards() {
     <div class="more">${open ? "▾ Hide history" : "▸ Show history"}</div>
     <div class="ylhist">${open ? `
       <div class="hhead"><div class="seg ylr">${[[24, "24h"], [72, "3d"], [168, "7d"], [720, "30d"]].map(([h, l]) => `<button data-h="${h}" aria-pressed="${h === hrs}">${l}</button>`).join("")}</div>
-        <span class="stats3" id="ylS-${id}"></span></div>
+        <span class="stats3" id="ylS-${id}"></span><span style="flex:1"></span><a href="#history" data-yoy="${id}" style="color:var(--s1);font-weight:600;text-decoration:none;font-size:13px">Year over year →</a></div>
       <h3>Temperature °F <span class="legend"><span><i style="background:var(--s1)"></i>${id === "out" ? "Outdoor" : escapeHtml(name)}</span>${id === "out" ? "" : `<span><i style="background:var(--ink-3)"></i>Outdoor</span>`}</span></h3>
       <svg class="viz" id="ylT-${id}"></svg>
       <h3>Humidity %</h3><svg class="viz h" id="ylH-${id}"></svg>` : ""}</div></div>`; };
@@ -682,6 +704,7 @@ async function drawCardHistory(id) {
     (hv.length ? `<span>humidity ${fmt(Math.min(...hv))}–${fmt(Math.max(...hv))}%</span>` : "") : "<span>No history yet</span>";
 }
 $("ylCards").addEventListener("click", e => {
+  const yo = e.target.closest("[data-yoy]"); if (yo) { hSrc = yo.dataset.yoy; return; }
   const c = e.target.closest(".ylc"); if (!c) return; const id = c.dataset.id;
   const rb = e.target.closest(".ylr button");
   if (rb) { ylOpen[id] = +rb.dataset.h; c.querySelectorAll(".ylr button").forEach(b => b.setAttribute("aria-pressed", b === rb)); drawCardHistory(id); return; }
@@ -700,6 +723,77 @@ $("ylRefresh").onclick = async () => { $("ylRefresh").textContent = "Searching�
   const r = await fetch("/api/yolink/refresh", {method: "POST"}).then(r => r.json()).catch(e => ({ok: false, error: String(e)}));
   $("ylRefresh").textContent = r.ok ? `Found ${r.devices.filter(d => d.type === "THSensor").length} sensors` : "Failed"; setTimeout(loadYolink, 2000); };
 setInterval(() => { if (page === "yolink") loadYolink(); }, 5 * 60000);
+
+/* ---------- History tab: year over year ---------- */
+const H_METRIC = {temp: ["Temperature", "°F"], humidity: ["Humidity", "%"], rain: ["Rain", "in"], wind: ["Peak gust", "mph"], pressure: ["Pressure", "inHg"]};
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const CUM = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+const doy = md => CUM[+md.slice(0, 2) - 1] + +md.slice(3) - 1;            // 0..365 on a common calendar
+const doyLabel = t => { const d = Math.round(t / 86400); let m = 11; while (m > 0 && CUM[m] > d) m--; return `${MONTHS[m]} ${d - CUM[m] + 1}`; };
+let hSources = [], hSrc = "out", hMetric = "temp", hData = null, hSum = null, hBackfill = null;
+async function loadHistoryPage() {
+  try { const r = await j("/api/history/sources"); hSources = r.sources; hBackfill = r.backfill; } catch (e) { return; }
+  if (!hSources.find(x => x.id === hSrc)) hSrc = (hSources[0] || {}).id || "out";
+  $("hSrc").innerHTML = hSources.map(x => `<option value="${escapeHtml(x.id)}"${x.id === hSrc ? " selected" : ""}>${escapeHtml(x.name)}</option>`).join("");
+  await loadYoy();
+}
+async function loadYoy() {
+  const src = hSources.find(x => x.id === hSrc) || {metrics: ["temp", "humidity"]};
+  if (!src.metrics.includes(hMetric)) hMetric = "temp";
+  $("hMetric").innerHTML = src.metrics.map(m => `<button data-m="${m}" aria-pressed="${m === hMetric}">${H_METRIC[m][0]}</button>`).join("");
+  $("hCsv").href = `/api/history/export.csv?source=${encodeURIComponent(hSrc)}`;
+  [hData, hSum] = await Promise.all([j(`/api/history/yoy?source=${encodeURIComponent(hSrc)}&metric=${hMetric}`), j(`/api/history/summary?source=${encodeURIComponent(hSrc)}`)]);
+  const note = $("hNote"), bf = hBackfill || {};
+  note.style.display = hSrc === "out" && bf.next && !bf.done ? "" : "none";
+  if (hSrc === "out" && bf.next && !bf.done) note.innerHTML = `Downloading your station's full history from Tempest in the background, currently back to <b>${bf.next}</b>. Older years appear as it goes.`;
+  if (hSrc !== "out" && src.first) { note.style.display = ""; note.textContent = `YoLink history starts ${src.first}, when this monitor first read the sensor. Each year adds another line.`; }
+  drawYoy(); renderSummary();
+}
+function drawYoy() {
+  if (!hData) return;
+  const years = Object.keys(hData.years).sort(), first = +years[0], [mname, unit] = H_METRIC[hMetric];
+  const color = y => (y - first) < 8 ? `var(--c${y - first + 1})` : "var(--ink-3)";
+  const cum = hMetric === "rain";
+  const series = years.map(y => {
+    let rows = hData.years[y].map(r => ({ts: doy(r.md) * 86400, v: r.avg ?? r.v})).sort((a, b) => a.ts - b.ts);
+    if (cum) { let c = 0; rows = rows.map(r => ({ts: r.ts, v: (c += r.v || 0)})); }
+    else { // 7-day rolling average smooths day-to-day noise
+      rows = rows.map((r, i) => { const w = rows.slice(Math.max(0, i - 3), i + 4).filter(x => Math.abs(x.ts - r.ts) <= 3 * 86400 && x.v != null);
+        return {ts: r.ts, v: w.length ? w.reduce((a, b) => a + b.v, 0) / w.length : null}; }); }
+    return {l: y, c: color(+y), w: +y === new Date().getFullYear() ? 2.5 : 1.75, rows};
+  });
+  $("hTitle").textContent = `${mname} year over year`;
+  const part = y => { const d = hData.years[y], f = d[0].md, l = d[d.length - 1].md, now = +y === new Date().getFullYear();
+    return f > "01-07" ? ` (from ${doyLabel(doy(f) * 86400)})` : !now && l < "12-24" ? ` (to ${doyLabel(doy(l) * 86400)})` : now ? " (so far)" : ""; };
+  $("hLeg").innerHTML = years.map(y => `<span><i style="background:${color(+y)}"></i>${y}${part(y)}</span>`).join("");
+  $("hHint").textContent = cum ? "Running rain total from January 1 for each year." :
+    hMetric === "wind" ? "Daily peak gust, 7-day average." : `Daily average ${mname.toLowerCase()}, 7-day average.`;
+  mchart($("hChart"), series, {u: hMetric === "pressure" ? " inHg" : unit === "in" ? " in" : unit === "mph" ? " mph" : unit, x0: 0, x1: 365 * 86400,
+    span: cum ? 1 : hMetric === "pressure" ? .2 : 10, dec: hMetric === "pressure" || cum ? 2 : 1, zero: cum || hMetric === "wind", gap: 10 * 86400,
+    xticks: MONTHS.map((m, i) => ({t: (CUM[i] + 15) * 86400, l: m})), tlabel: doyLabel});
+}
+function renderSummary() {
+  if (!hSum) return;
+  const out = hSrc === "out", R = hSum.records, dd = d => d ? new Date(d + "T12:00").toLocaleDateString([], {month: "short", day: "numeric", year: "numeric"}) : "";
+  const rec = (t, v, d) => v == null ? "" : `<div class="card"><h2>${t}</h2><div class="v">${v}</div><div class="d">${d}</div></div>`;
+  $("hRecs").innerHTML = rec("Hottest", R.hottest && `${fmt(R.hottest.t_hi, 1)}°F`, dd(R.hottest?.day)) + rec("Coldest", R.coldest && `${fmt(R.coldest.t_lo, 1)}°F`, dd(R.coldest?.day)) +
+    (out ? rec("Wettest day", R.wettest && `${fmt(R.wettest.rain_in, 2)} in`, dd(R.wettest?.day)) + rec("Strongest gust", R.windiest && `${fmt(R.windiest.gust_mph)} mph`, dd(R.windiest?.day)) : "");
+  const Y = hSum.yearly, cols = out
+    ? [["Days", r => r.days], ["Avg temp", r => fmt(r.t_avg, 1) + "°"], ["High", r => fmt(r.t_hi, 1) + "°"], ["Low", r => fmt(r.t_lo, 1) + "°"], ["Rain", r => fmt(r.rain, 2) + " in"], ["Rain days", r => r.rain_days], ["Max gust", r => fmt(r.gust) + " mph"], ["Lightning", r => r.strikes ?? 0], ["Hail days", r => r.hail_days], ["100°F days", r => r.days_100], ["Freeze days", r => r.freeze_days]]
+    : [["Days", r => r.days], ["Avg temp", r => fmt(r.t_avg, 1) + "°"], ["High", r => fmt(r.t_hi, 1) + "°"], ["Low", r => fmt(r.t_lo, 1) + "°"], ["Avg humidity", r => fmt(r.h_avg) + "%"]];
+  $("hYears").innerHTML = `<tr><th>Year</th>${cols.map(c => `<th class="n">${c[0]}</th>`).join("")}</tr>` + Y.map(r => `<tr><td>${r.year}</td>${cols.map(c => `<td class="n">${c[1](r)}</td>`).join("")}</tr>`).join("");
+  const years = Y.map(r => r.year), M = {}; hSum.monthly.forEach(r => (M[r.month] = M[r.month] || {})[r.year] = r);
+  const mv = {temp: [r => r.t_avg, 1, "°", "Average temperature"], humidity: [r => r.h_avg, 0, "%", "Average humidity"], rain: [r => r.rain, 2, " in", "Total rain"],
+              wind: [r => r.t_hi, 1, "°", "Highest temperature"], pressure: [r => r.t_avg, 1, "°", "Average temperature"]}[hMetric];
+  $("hMonTitle").textContent = `By month · ${mv[3]}`;
+  $("hMonths").innerHTML = `<tr><th>Month</th>${years.map(y => `<th class="n">${y}</th>`).join("")}${years.length > 1 ? `<th class="n">Change vs ${years[years.length - 2]}</th>` : ""}</tr>` +
+    MONTHS.map((m, i) => { const k = String(i + 1).padStart(2, "0"), row = M[k] || {};
+      const vals = years.map(y => row[y] ? mv[0](row[y]) : null), a = vals[vals.length - 1], b = vals[vals.length - 2];
+      const ext = vals.filter(v => v != null), best = ext.length > 1 ? Math.max(...ext) : null;
+      return `<tr><td>${m}</td>${vals.map(v => `<td class="n${v != null && v === best ? " hl" : ""}">${v == null ? "" : fmt(v, mv[1]) + mv[2]}</td>`).join("")}${years.length > 1 ? `<td class="n">${a != null && b != null ? (a - b >= 0 ? "+" : "") + fmt(a - b, mv[1]) + mv[2] : ""}</td>` : ""}</tr>`; }).join("");
+}
+$("hSrc").onchange = e => { hSrc = e.target.value; loadYoy(); };
+$("hMetric").onclick = e => { const b = e.target.closest("button"); if (b) { hMetric = b.dataset.m; loadYoy(); } };
 
 setTheme(savedTheme);
 showPage();

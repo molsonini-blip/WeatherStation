@@ -118,6 +118,23 @@ The tab shows a card per sensor (temperature, humidity, 24 h low/high, battery, 
 the Tempest outdoor temperature as a dashed reference. There's also a sensor table. History is kept in the same database. New sensors are picked up every 6 hours, or right away
 with **Find new sensors**.
 
+## History (year over year)
+
+Everything is kept: every 1-minute Tempest observation, every lightning strike, every YoLink reading, in `data/tempest.db`.
+Nothing is ever pruned except the 3-second wind samples outside of storms.
+
+- **Full Tempest history:** on first start the monitor downloads your station's entire history from Tempest's cloud,
+  one day at a time (newest first, about 2 s per day, so roughly 12 minutes per year of history). Progress shows on the
+  History tab. Turn off with `HISTORY_BACKFILL=false`.
+- **Daily summaries:** each day is rolled up per sensor (high/low/average temperature and humidity, rain, peak gust,
+  pressure, UV, lightning strikes, hail minutes) for fast year-over-year views.
+- **History tab** (`#history`): pick a sensor and metric to get one line per year across Jan–Dec (rain as a running
+  total), all-time records, a by-year table (rain days, 100°F days, freeze days, hail days…) and a month-by-year table with the
+  change from last year. **Download CSV** exports the daily table for Excel. YoLink cards link straight to their history.
+- **Backups:** every night after the daily summary, a copy of the database goes to `data/backups/`
+  (last `BACKUP_KEEP_DAYS`=14 days plus one per month for `BACKUP_KEEP_MONTHS`=24 months). Copy that folder somewhere
+  off the EdgeXpert from time to time.
+
 ## Hail camera (Reolink + AI measurement)
 
 A Reolink camera looks down at a **hail plate**: a matte black board (400 × 400 mm by default) with four printed markers
@@ -159,7 +176,7 @@ In testing on synthetic frames the sizes came out within about 1–2 mm.
 These endpoints are useful for Home Assistant, Grafana, or your LLM stack:
 
 `/api/state` · `/api/history?hours=24` · `/api/rapid?minutes=30` · `/api/strikes?hours=24` ·
-`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/wind_rose?hours=24` · `/api/yolink/sensors` · `/api/yolink/history?hours=24&device=<id>` · `/api/hailcam` · `/api/hailcam/image` · `POST /api/hailcam/test` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
+`/api/storms` · `/api/events` · `/api/shield` (GET; POST `{"mode":"auto|on|off"}`) · `/api/wind_candles` · `/api/wind_rose?hours=24` · `/api/yolink/sensors` · `/api/yolink/history?hours=24&device=<id>` · `/api/history/sources` · `/api/history/yoy?source=out&metric=temp` · `/api/history/summary` · `/api/history/export.csv` · `/api/hailcam` · `/api/hailcam/image` · `POST /api/hailcam/test` · `/api/daily?days=14` · `/api/stream` (server-sent events) ·
 `POST /api/test-ifttt`
 
 ## Notes
